@@ -19,6 +19,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/CrontabEditor" "$MACOS_DIR/CrontabEditor"
 chmod 755 "$MACOS_DIR/CrontabEditor"
 cp "$ROOT_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+if [ -d "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" ]; then
+    cp -R "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" "$RESOURCES_DIR/"
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

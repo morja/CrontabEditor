@@ -5,12 +5,16 @@ import PackageDescription
 
 let package = Package(
     name: "CrontabEditor",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
     targets: [
         .executableTarget(
-            name: "CrontabEditor"
+            name: "CrontabEditor",
+            resources: [
+                .process("Resources")
+            ]
         ),
     ],
     swiftLanguageModes: [.v6]

@@ -2,6 +2,16 @@ import AppKit
 import Foundation
 import SwiftUI
 
+enum L10n {
+    static func t(_ key: String) -> String {
+        NSLocalizedString(key, bundle: .module, comment: "")
+    }
+
+    static func f(_ key: String, _ arguments: CVarArg...) -> String {
+        String(format: t(key), locale: .current, arguments: arguments)
+    }
+}
+
 @main
 struct CrontabEditorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -23,24 +33,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum TimeFieldMode: String, CaseIterable, Identifiable {
-    case every = "Jede"
-    case specific = "Bestimmte"
-    case interval = "Alle N"
+    case every = "Every"
+    case specific = "Specific"
+    case interval = "Every N"
 
     var id: String { rawValue }
+    var title: String { L10n.t(rawValue) }
 }
 
 enum Weekday: String, CaseIterable, Identifiable {
-    case every = "Jeden Tag"
-    case sunday = "Sonntag"
-    case monday = "Montag"
-    case tuesday = "Dienstag"
-    case wednesday = "Mittwoch"
-    case thursday = "Donnerstag"
-    case friday = "Freitag"
-    case saturday = "Samstag"
+    case every = "Every Day"
+    case sunday = "Sunday"
+    case monday = "Monday"
+    case tuesday = "Tuesday"
+    case wednesday = "Wednesday"
+    case thursday = "Thursday"
+    case friday = "Friday"
+    case saturday = "Saturday"
 
     var id: String { rawValue }
+    var title: String { L10n.t(rawValue) }
+    var shortTitle: String {
+        switch self {
+        case .every: L10n.t("Every Day.short")
+        case .sunday: L10n.t("Sunday.short")
+        case .monday: L10n.t("Monday.short")
+        case .tuesday: L10n.t("Tuesday.short")
+        case .wednesday: L10n.t("Wednesday.short")
+        case .thursday: L10n.t("Thursday.short")
+        case .friday: L10n.t("Friday.short")
+        case .saturday: L10n.t("Saturday.short")
+        }
+    }
 
     var cronValue: String {
         switch self {
@@ -84,12 +108,14 @@ struct CronJob: Identifiable, Equatable {
     var label: String
     var backend: JobBackend
     var scriptPath: String
+    var programArgumentsText: String
     var minuteMode: TimeFieldMode
     var specificMinute: Int
     var minuteInterval: Int
     var hourMode: TimeFieldMode
     var specificHour: Int
     var hourInterval: Int
+    var scheduleEnabled: Bool
     var weekday: Weekday
     var selectedWeekdays: [Weekday]
     var fixedTimes: [DailyTime]
@@ -98,21 +124,24 @@ struct CronJob: Identifiable, Equatable {
     var standardOutPath: String
     var standardErrorPath: String
     var isEnabled: Bool
+    var isManaged: Bool
     var originalCommand: String?
 
     static func blank() -> CronJob {
-        let name = "Neuer Job"
+        let name = L10n.t("New Job")
         return CronJob(
             name: name,
             label: CronJob.label(for: name),
             backend: .crontab,
             scriptPath: "",
+            programArgumentsText: "",
             minuteMode: .every,
             specificMinute: 0,
             minuteInterval: 15,
             hourMode: .every,
             specificHour: 2,
             hourInterval: 1,
+            scheduleEnabled: true,
             weekday: .every,
             selectedWeekdays: [],
             fixedTimes: [],
@@ -121,6 +150,7 @@ struct CronJob: Identifiable, Equatable {
             standardOutPath: "",
             standardErrorPath: "",
             isEnabled: true,
+            isManaged: true,
             originalCommand: nil
         )
     }
@@ -142,7 +172,8 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var cronExpression: String {
-        "\(minuteExpression) \(hourExpression) * * \(weekdayExpression)"
+        guard scheduleEnabled else { return L10n.t("No schedule") }
+        return "\(minuteExpression) \(hourExpression) * * \(weekdayExpression)"
     }
 
     var weekdayExpression: String {
@@ -155,6 +186,7 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var cronExpressions: [String] {
+        guard scheduleEnabled else { return [] }
         if fixedTimes.isEmpty {
             return [cronExpression]
         }
@@ -163,7 +195,36 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var command: String {
-        originalCommand ?? shellEscaped(scriptPath)
+        let base = ([scriptPath] + programArguments).map(shellEscaped).joined(separator: " ")
+        guard loggingEnabled else {
+            return base
+        }
+
+        let outPath = standardOutPath.isEmpty ? defaultCronOutLogPath : standardOutPath
+        let errPath = standardErrorPath.isEmpty ? defaultCronErrorLogPath : standardErrorPath
+        return "\(base) >> \(shellEscaped(outPath)) 2>> \(shellEscaped(errPath))"
+    }
+
+    var programArguments: [String] {
+        parseArguments(programArgumentsText)
+    }
+
+    var launchdProgramArguments: [String] {
+        [scriptPath] + programArguments
+    }
+
+    var defaultCronOutLogPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs")
+            .appendingPathComponent("\(label).out.log")
+            .path
+    }
+
+    var defaultCronErrorLogPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs")
+            .appendingPathComponent("\(label).err.log")
+            .path
     }
 
     var cronLine: String {
@@ -171,7 +232,8 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var cronLines: [String] {
-        cronExpressions.map { expression in
+        guard scheduleEnabled else { return [] }
+        return cronExpressions.map { expression in
             let line = "\(expression) \(command)"
             return isEnabled ? line : "# \(line)"
         }
@@ -190,27 +252,33 @@ struct CronJob: Identifiable, Equatable {
 
     var title: String {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? "Neuer Job" : value
+        return value.isEmpty ? L10n.t("New Job") : value
     }
 
     var subtitle: String {
-        "\(backend.rawValue) · \(cronExpressions.first ?? cronExpression) · \(isEnabled ? "aktiv" : "inaktiv")"
+        "\(backend.rawValue) · \(cronExpressions.first ?? cronExpression) · \(isEnabled ? L10n.t("active") : L10n.t("inactive"))"
     }
 
     var scheduleDescription: String {
+        guard scheduleEnabled else {
+            return runAtLoad
+                ? L10n.t("No schedule. The job starts when loaded and via Run now.")
+                : L10n.t("No schedule. The job starts only via Run now.")
+        }
+
         let minuteText = switch minuteMode {
-        case .every: "jede Minute"
-        case .specific: "Minute \(specificMinute)"
-        case .interval: "alle \(minuteInterval) Minuten"
+        case .every: L10n.t("every minute")
+        case .specific: L10n.f("minute %d", specificMinute)
+        case .interval: L10n.f("every %d minutes", minuteInterval)
         }
 
         let hourText = switch hourMode {
-        case .every: "jede Stunde"
-        case .specific: "um \(String(format: "%02d", specificHour)) Uhr"
-        case .interval: "alle \(hourInterval) Stunden"
+        case .every: L10n.t("every hour")
+        case .specific: L10n.f("at %02d:00", specificHour)
+        case .interval: L10n.f("every %d hours", hourInterval)
         }
 
-        let dayText = activeWeekdays.isEmpty ? "Jeden Tag" : activeWeekdays.map(\.rawValue).joined(separator: ", ")
+        let dayText = activeWeekdays.isEmpty ? L10n.t("Every Day") : activeWeekdays.map(\.title).joined(separator: ", ")
         let timeText = fixedTimes.isEmpty ? "\(hourText), \(minuteText)" : fixedTimes.map(\.label).joined(separator: ", ")
 
         return "\(dayText), \(timeText)."
@@ -218,6 +286,51 @@ struct CronJob: Identifiable, Equatable {
 
     private func shellEscaped(_ path: String) -> String {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func parseArguments(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var quote: Character?
+        var isEscaped = false
+
+        for character in text {
+            if isEscaped {
+                current.append(character)
+                isEscaped = false
+                continue
+            }
+            if character == "\\" {
+                isEscaped = true
+                continue
+            }
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+            if character == "'" || character == "\"" {
+                quote = character
+                continue
+            }
+            if character.isWhitespace {
+                if !current.isEmpty {
+                    result.append(current)
+                    current = ""
+                }
+                continue
+            }
+            current.append(character)
+        }
+
+        if !current.isEmpty {
+            result.append(current)
+        }
+
+        return result
     }
 
     static func label(for name: String) -> String {
@@ -243,8 +356,9 @@ struct CrontabDocument {
 final class CrontabViewModel: ObservableObject {
     @Published var jobs: [CronJob] = []
     @Published var selectedJobID: CronJob.ID?
-    @Published var statusMessage = "Noch nicht geladen."
+    @Published var statusMessage = L10n.t("Not loaded yet.")
     @Published var invalidJobIDs: Set<CronJob.ID> = []
+    @Published var showExternalJobs = false
 
     private let manager = CrontabManager()
     private let launchAgentManager = LaunchAgentManager()
@@ -262,7 +376,23 @@ final class CrontabViewModel: ObservableObject {
     }
 
     var canSave: Bool {
-        jobs.allSatisfy { !$0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        jobs.filter(isEditable).allSatisfy { !$0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    var managedJobs: [CronJob] {
+        jobs.filter(\.isManaged)
+    }
+
+    var externalJobs: [CronJob] {
+        jobs.filter { !$0.isManaged }
+    }
+
+    func isEditable(_ job: CronJob) -> Bool {
+        job.isManaged || job.backend == .crontab
+    }
+
+    var visibleJobs: [CronJob] {
+        showExternalJobs ? jobs : managedJobs
     }
 
     func load() {
@@ -273,9 +403,9 @@ final class CrontabViewModel: ObservableObject {
             jobs = document.jobs + launchAgentJobs + launchDaemonJobs
             preservedLines = document.preservedLines
             selectedJobID = jobs.first?.id
-            statusMessage = jobs.isEmpty ? "Keine Cronjobs gefunden." : "\(jobs.count) Cronjob(s) geladen."
+            statusMessage = jobs.isEmpty ? L10n.t("No cron jobs found.") : L10n.f("%d cron job(s) loaded.", jobs.count)
         } catch {
-            statusMessage = "Crontab konnte nicht gelesen werden: \(error.localizedDescription)"
+            statusMessage = L10n.f("Could not read crontab: %@", error.localizedDescription)
         }
     }
 
@@ -283,34 +413,39 @@ final class CrontabViewModel: ObservableObject {
         let job = CronJob.blank()
         jobs.append(job)
         selectedJobID = job.id
-        statusMessage = "Neuer Job angelegt."
+        statusMessage = L10n.t("New job created.")
     }
 
     func deleteSelectedJob() {
         guard let selectedIndex else { return }
+        guard isEditable(jobs[selectedIndex]) else {
+            statusMessage = L10n.t("External LaunchAgent/LaunchDaemon jobs are display-only.")
+            return
+        }
         jobs.remove(at: selectedIndex)
         selectedJobID = jobs.indices.contains(selectedIndex) ? jobs[selectedIndex].id : jobs.last?.id
-        statusMessage = "Job entfernt. Speichern schreibt die Änderung in die Crontab."
+        statusMessage = L10n.t("Job removed. Save writes the change to the crontab.")
     }
 
     func save() {
         guard canSave else {
             invalidJobIDs = Set(jobs
+                .filter(isEditable)
                 .filter { $0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 .map(\.id))
             selectedJobID = invalidJobIDs.first ?? selectedJobID
-            statusMessage = "Alle Jobs brauchen einen Script-Pfad."
+            statusMessage = L10n.t("All jobs need a script path.")
             return
         }
         invalidJobIDs.removeAll()
 
         do {
             try manager.save(jobs: jobs.filter { $0.backend == .crontab }, preservedLines: preservedLines)
-            try launchAgentManager.save(jobs: jobs.filter { $0.backend == .launchAgent })
-            try launchDaemonManager.save(jobs: jobs.filter { $0.backend == .launchDaemon })
-            statusMessage = "Jobs gespeichert."
+            try launchAgentManager.save(jobs: jobs.filter { $0.backend == .launchAgent && $0.isManaged })
+            try launchDaemonManager.save(jobs: jobs.filter { $0.backend == .launchDaemon && $0.isManaged })
+            statusMessage = L10n.t("Jobs saved.")
         } catch {
-            statusMessage = "Speichern fehlgeschlagen: \(error.localizedDescription)"
+            statusMessage = L10n.f("Save failed: %@", error.localizedDescription)
         }
     }
 
@@ -320,15 +455,15 @@ final class CrontabViewModel: ObservableObject {
         do {
             switch selectedJob.backend {
             case .crontab:
-                try ScriptRunner.run(path: selectedJob.scriptPath)
+                try ScriptRunner.run(path: selectedJob.scriptPath, arguments: selectedJob.programArguments)
             case .launchAgent:
                 try launchAgentManager.runNow(selectedJob)
             case .launchDaemon:
                 try launchDaemonManager.runNow(selectedJob)
             }
-            statusMessage = "Job gestartet."
+            statusMessage = L10n.t("Job started.")
         } catch {
-            statusMessage = "Start fehlgeschlagen: \(error.localizedDescription)"
+            statusMessage = L10n.f("Start failed: %@", error.localizedDescription)
         }
     }
 
@@ -339,7 +474,7 @@ final class CrontabViewModel: ObservableObject {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.title = "Script auswählen"
+        panel.title = L10n.t("Choose Script")
 
         if panel.runModal() == .OK, let url = panel.url {
             jobs[selectedIndex].scriptPath = url.path
@@ -357,6 +492,14 @@ final class CrontabViewModel: ObservableObject {
         guard let selectedIndex else { return }
         jobs[selectedIndex].name = name
         jobs[selectedIndex].label = CronJob.label(for: name)
+    }
+
+    func setBackendForSelectedJob(_ backend: JobBackend) {
+        guard let selectedIndex else { return }
+        jobs[selectedIndex].backend = backend
+        if backend == .crontab {
+            jobs[selectedIndex].runAtLoad = false
+        }
     }
 
     func setWeekdaysForSelectedJob(_ weekdays: [Weekday]) {
@@ -387,12 +530,14 @@ final class CrontabViewModel: ObservableObject {
 struct CrontabManager {
     private let beginMarker = "# CrontabEditor BEGIN"
     private let endMarker = "# CrontabEditor END"
+    private let jobMarkerPrefix = "# CrontabEditor JOB "
 
     func load() throws -> CrontabDocument {
         let crontab = try readCrontab()
         var jobs: [CronJob] = []
         var preservedLines: [String] = []
         var insideOldManagedBlock = false
+        var nextManagedName: String?
 
         for line in crontab.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
             if line == beginMarker {
@@ -403,8 +548,26 @@ struct CrontabManager {
                 insideOldManagedBlock = false
                 continue
             }
+            if line.hasPrefix(jobMarkerPrefix) {
+                nextManagedName = String(line.dropFirst(jobMarkerPrefix.count))
+                continue
+            }
             if let job = parse(line: line) {
-                jobs.append(job)
+                if let managedName = nextManagedName {
+                    var managedJob = job
+                    managedJob.isManaged = true
+                    managedJob.name = managedName
+                    managedJob.label = CronJob.label(for: managedName)
+                    jobs.append(managedJob)
+                    nextManagedName = nil
+                } else if insideOldManagedBlock {
+                    var managedJob = job
+                    managedJob.isManaged = true
+                    jobs.append(managedJob)
+                } else {
+                    jobs.append(job)
+                    preservedLines.append(line)
+                }
             } else if !insideOldManagedBlock {
                 preservedLines.append(line)
             }
@@ -414,7 +577,9 @@ struct CrontabManager {
     }
 
     func save(jobs: [CronJob], preservedLines: [String]) throws {
-        let jobLines = jobs.flatMap(\.cronLines)
+        let jobLines = jobs.flatMap { job in
+            job.isManaged ? ["\(jobMarkerPrefix)\(job.name)"] + job.cronLines : job.cronLines
+        }
         var lines = trimmedTrailingEmptyLines(preservedLines)
 
         if !lines.isEmpty && !jobLines.isEmpty {
@@ -453,14 +618,17 @@ struct CrontabManager {
         }
 
         let command = parts[5]
-        let scriptPath = unquote(command)
+        let commandParts = parseCommand(command)
+        let scriptPath = commandParts.first ?? unquote(command)
         var job = CronJob.blank()
         job.backend = .crontab
+        job.isManaged = false
         job.scriptPath = scriptPath
+        job.programArgumentsText = commandParts.dropFirst().map(shellEscaped).joined(separator: " ")
         job.name = URL(fileURLWithPath: scriptPath).lastPathComponent
         job.label = CronJob.label(for: job.name)
         job.isEnabled = isEnabled
-        job.originalCommand = command == job.command ? nil : command
+        job.originalCommand = nil
         applyMinute(parts[0], to: &job)
         applyHour(parts[1], to: &job)
         job.selectedWeekdays = parseWeekdays(parts[4])
@@ -513,6 +681,55 @@ struct CrontabManager {
             .replacingOccurrences(of: "'\\''", with: "'")
     }
 
+    private func parseCommand(_ command: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var quote: Character?
+        var isEscaped = false
+
+        for character in command {
+            if isEscaped {
+                current.append(character)
+                isEscaped = false
+                continue
+            }
+            if character == "\\" {
+                isEscaped = true
+                continue
+            }
+            if let activeQuote = quote {
+                if character == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(character)
+                }
+                continue
+            }
+            if character == "'" || character == "\"" {
+                quote = character
+                continue
+            }
+            if character.isWhitespace {
+                if !current.isEmpty {
+                    result.append(current)
+                    current = ""
+                }
+                continue
+            }
+            current.append(character)
+        }
+
+        if !current.isEmpty {
+            result.append(current)
+        }
+
+        return result
+    }
+
+    private func shellEscaped(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     private func trimmedTrailingEmptyLines(_ lines: [String]) -> [String] {
         var result = lines
         while result.last?.isEmpty == true {
@@ -557,10 +774,10 @@ struct CrontabManager {
 }
 
 struct ScriptRunner {
-    static func run(path: String) throws {
+    static func run(path: String, arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = []
+        process.arguments = arguments
         try process.run()
     }
 }
@@ -578,14 +795,14 @@ struct LaunchAgentManager {
         }
 
         return files
-            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "plist" }
+            .filter { $0.pathExtension == "plist" }
             .compactMap(loadJob)
     }
 
     func save(jobs: [CronJob]) throws {
         try FileManager.default.createDirectory(at: launchAgentsDirectory, withIntermediateDirectories: true)
 
-        let existing = try load()
+        let existing = try load().filter(\.isManaged)
         let nextLabels = Set(jobs.map(\.label))
         for job in existing where !nextLabels.contains(job.label) {
             try? unload(job)
@@ -636,14 +853,17 @@ struct LaunchAgentManager {
         var job = CronJob.blank()
         job.backend = .launchAgent
         job.label = label
-        job.name = displayName(from: label)
+        job.isManaged = label.hasPrefix(prefix)
+        job.name = job.isManaged ? displayName(from: label) : label
         job.scriptPath = scriptPath
+        job.programArgumentsText = arguments.dropFirst().map(shellEscaped).joined(separator: " ")
         job.isEnabled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
         job.standardOutPath = (plist["StandardOutPath"] as? String) ?? ""
         job.standardErrorPath = (plist["StandardErrorPath"] as? String) ?? ""
         job.loggingEnabled = !job.standardOutPath.isEmpty || !job.standardErrorPath.isEmpty
+        job.scheduleEnabled = plist["StartInterval"] != nil || plist["StartCalendarInterval"] != nil
 
         if let interval = plist["StartInterval"] as? Int {
             applyStartInterval(interval, to: &job)
@@ -659,7 +879,7 @@ struct LaunchAgentManager {
     private func plistDictionary(for job: CronJob) -> [String: Any] {
         var plist: [String: Any] = [
             "Label": job.label,
-            "ProgramArguments": [job.scriptPath],
+            "ProgramArguments": job.launchdProgramArguments,
             "RunAtLoad": job.runAtLoad
         ]
 
@@ -668,10 +888,12 @@ struct LaunchAgentManager {
             plist["StandardErrorPath"] = job.standardErrorPath.isEmpty ? logPath(for: job, suffix: "err") : job.standardErrorPath
         }
 
-        if let interval = startInterval(for: job) {
-            plist["StartInterval"] = interval
-        } else {
-            plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
+        if job.scheduleEnabled {
+            if let interval = startInterval(for: job) {
+                plist["StartInterval"] = interval
+            } else {
+                plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
+            }
         }
 
         return plist
@@ -819,6 +1041,10 @@ struct LaunchAgentManager {
             .joined(separator: " ")
     }
 
+    private func shellEscaped(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     private func run(_ executable: String, arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -856,12 +1082,12 @@ struct LaunchDaemonManager {
         }
 
         return files
-            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "plist" }
+            .filter { $0.pathExtension == "plist" }
             .compactMap(loadJob)
     }
 
     func save(jobs: [CronJob]) throws {
-        let existing = try load()
+        let existing = try load().filter(\.isManaged)
         let nextLabels = Set(jobs.map(\.label))
         var commands: [String] = [
             "set -e",
@@ -930,14 +1156,17 @@ struct LaunchDaemonManager {
         var job = CronJob.blank()
         job.backend = .launchDaemon
         job.label = label
-        job.name = displayName(from: label)
+        job.isManaged = label.hasPrefix(prefix)
+        job.name = job.isManaged ? displayName(from: label) : label
         job.scriptPath = scriptPath
+        job.programArgumentsText = arguments.dropFirst().map(shellEscaped).joined(separator: " ")
         job.isEnabled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
         job.standardOutPath = (plist["StandardOutPath"] as? String) ?? ""
         job.standardErrorPath = (plist["StandardErrorPath"] as? String) ?? ""
         job.loggingEnabled = !job.standardOutPath.isEmpty || !job.standardErrorPath.isEmpty
+        job.scheduleEnabled = plist["StartInterval"] != nil || plist["StartCalendarInterval"] != nil
 
         if let interval = plist["StartInterval"] as? Int {
             applyStartInterval(interval, to: &job)
@@ -953,7 +1182,7 @@ struct LaunchDaemonManager {
     private func plistDictionary(for job: CronJob) -> [String: Any] {
         var plist: [String: Any] = [
             "Label": job.label,
-            "ProgramArguments": [job.scriptPath],
+            "ProgramArguments": job.launchdProgramArguments,
             "RunAtLoad": job.runAtLoad
         ]
 
@@ -962,10 +1191,12 @@ struct LaunchDaemonManager {
             plist["StandardErrorPath"] = job.standardErrorPath.isEmpty ? "/var/log/\(job.label).err.log" : job.standardErrorPath
         }
 
-        if let interval = startInterval(for: job) {
-            plist["StartInterval"] = interval
-        } else {
-            plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
+        if job.scheduleEnabled {
+            if let interval = startInterval(for: job) {
+                plist["StartInterval"] = interval
+            } else {
+                plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
+            }
         }
 
         return plist
@@ -1129,6 +1360,10 @@ struct LaunchDaemonManager {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private func shellEscaped(_ value: String) -> String {
+        shellQuoted(value)
+    }
+
     private func appleScriptQuoted(_ value: String) -> String {
         "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
@@ -1174,11 +1409,19 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Crontab Editor")
+                    .font(.title2.bold())
+                Text(L10n.t("Crontab, LaunchAgent, and LaunchDaemon"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack {
-                Text("Cronjobs")
+                Text(L10n.t("Jobs"))
                     .font(.title2.bold())
                 Spacer()
-                Text("\(viewModel.jobs.count)")
+                Text("\(viewModel.visibleJobs.count)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -1187,10 +1430,22 @@ struct ContentView: View {
             }
 
             List(selection: $viewModel.selectedJobID) {
-                ForEach(viewModel.jobs) { job in
-                    JobRow(job: job)
-                        .tag(job.id)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
+                Section(L10n.t("From Crontab Editor")) {
+                    ForEach(viewModel.managedJobs) { job in
+                        JobRow(job: job)
+                            .tag(job.id)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
+                    }
+                }
+
+                if viewModel.showExternalJobs {
+                    Section(L10n.t("External")) {
+                        ForEach(viewModel.externalJobs) { job in
+                            JobRow(job: job)
+                                .tag(job.id)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
+                        }
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -1200,14 +1455,18 @@ struct ContentView: View {
                 Button {
                     viewModel.addJob()
                 } label: {
-                    Label("Hinzufügen", systemImage: "plus")
+                    Label(L10n.t("Add"), systemImage: "plus")
                 }
                 Button {
                     viewModel.deleteSelectedJob()
                 } label: {
-                    Label("Löschen", systemImage: "trash")
+                    Label(L10n.t("Delete"), systemImage: "trash")
                 }
                 .disabled(viewModel.selectedJobID == nil)
+                Spacer()
+                Toggle(L10n.t("External"), isOn: $viewModel.showExternalJobs)
+                    .font(.caption)
+                    .toggleStyle(.checkbox)
             }
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
@@ -1223,20 +1482,28 @@ struct ContentView: View {
         if let index = viewModel.selectedIndex {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    header
+                    if !viewModel.isEditable(viewModel.jobs[index]) {
+                        externalJobNotice
+                    }
                     jobBasicsSection(index: index)
+                        .disabled(!viewModel.isEditable(viewModel.jobs[index]))
                     scriptSection(index: index)
+                        .disabled(!viewModel.isEditable(viewModel.jobs[index]))
                     scheduleSection(index: index)
+                        .disabled(!viewModel.isEditable(viewModel.jobs[index]))
                     statusSection(index: index)
+                        .disabled(!viewModel.isEditable(viewModel.jobs[index]))
+                    advancedSection(index: index)
+                        .disabled(!viewModel.isEditable(viewModel.jobs[index]))
                     footer
                 }
                 .padding(24)
             }
         } else {
             VStack(spacing: 12) {
-                Text("Kein Job ausgewählt")
+                Text(L10n.t("No job selected"))
                     .font(.title2.bold())
-                Button("Job hinzufügen") {
+                Button(L10n.t("Add Job")) {
                     viewModel.addJob()
                 }
             }
@@ -1244,21 +1511,21 @@ struct ContentView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Crontab Editor")
-                .font(.largeTitle.bold())
-            Text("Liest Crontab- und LaunchAgent-Jobs und speichert sie in das gewählte Backend.")
-                .foregroundStyle(.secondary)
-        }
+    private var externalJobNotice: some View {
+        Text(L10n.t("External LaunchAgents and LaunchDaemons are not editable."))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func jobBasicsSection(index: Int) -> some View {
-        SectionBox(title: "Job") {
+        SectionBox(title: L10n.t("Job")) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Name")
+                        Text(L10n.t("Name"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         TextField("Backup Job", text: Binding(
@@ -1270,7 +1537,7 @@ struct ContentView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 4) {
-                            Text("Typ")
+                            Text(L10n.t("Type"))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Button {
@@ -1279,13 +1546,16 @@ struct ContentView: View {
                                 Image(systemName: "questionmark.circle")
                             }
                             .buttonStyle(.borderless)
-                            .help("Unterschiede zwischen Crontab, LaunchAgent und LaunchDaemon")
+                            .help(L10n.t("Differences between Crontab, LaunchAgent, and LaunchDaemon"))
                             .popover(isPresented: $isBackendHelpVisible, arrowEdge: .top) {
                                 BackendHelpView()
                             }
                         }
 
-                        Picker("Typ", selection: binding(index, \.backend)) {
+                        Picker(L10n.t("Type"), selection: Binding(
+                            get: { viewModel.jobs[index].backend },
+                            set: { viewModel.setBackendForSelectedJob($0) }
+                        )) {
                             ForEach(JobBackend.allCases) { backend in
                                 Text(backend.rawValue).tag(backend)
                             }
@@ -1296,16 +1566,16 @@ struct ContentView: View {
                     }
                 }
 
-                Text("LaunchD-ID: \(viewModel.jobs[index].label)")
+                Text(L10n.f("LaunchD ID: %@", viewModel.jobs[index].label))
                     .font(.system(.body, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
 
                 Text(viewModel.jobs[index].backend == .crontab
-                    ? "Speichert den Job in deiner User-Crontab."
+                    ? L10n.t("Saves the job in your user crontab.")
                     : viewModel.jobs[index].backend == .launchAgent
-                        ? "Speichert den Job als LaunchAgent unter ~/Library/LaunchAgents."
-                        : "Speichert den Job als LaunchDaemon unter /Library/LaunchDaemons. macOS fragt nach Admin-Rechten.")
+                        ? L10n.t("Saves the job as a LaunchAgent under ~/Library/LaunchAgents.")
+                        : L10n.t("Saves the job as a LaunchDaemon under /Library/LaunchDaemons. macOS asks for admin rights."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -1313,7 +1583,7 @@ struct ContentView: View {
     }
 
     private func scriptSection(index: Int) -> some View {
-        SectionBox(title: "Script") {
+        SectionBox(title: L10n.t("Script")) {
             let isInvalid = viewModel.invalidJobIDs.contains(viewModel.jobs[index].id)
 
             VStack(alignment: .leading, spacing: 7) {
@@ -1331,13 +1601,13 @@ struct ContentView: View {
                                 viewModel.invalidJobIDs.remove($0.id)
                             }
                         }
-                    Button("Auswählen") {
+                    Button(L10n.t("Choose")) {
                         viewModel.chooseScriptForSelectedJob()
                     }
                 }
 
                 if isInvalid {
-                    Text("Script-Pfad fehlt. Bitte Datei auswählen oder Pfad eintragen.")
+                    Text(L10n.t("Script path is missing. Choose a file or enter a path."))
                         .font(.caption)
                         .foregroundStyle(.red)
                 }
@@ -1346,17 +1616,19 @@ struct ContentView: View {
     }
 
     private func scheduleSection(index: Int) -> some View {
-        SectionBox(title: "Zeitplan") {
+        SectionBox(title: L10n.t("Schedule")) {
             VStack(alignment: .leading, spacing: 10) {
+                Toggle(L10n.t("Schedule enabled"), isOn: binding(index, \.scheduleEnabled))
+
                 HStack(alignment: .center, spacing: 10) {
-                    Picker("Tage", selection: Binding(
+                    Picker(L10n.t("Days"), selection: Binding(
                         get: { weekdayPreset(for: viewModel.jobs[index]) },
                         set: { applyWeekdayPreset($0) }
                     )) {
-                        Text("Täglich").tag("daily")
-                        Text("Werktage").tag("workdays")
-                        Text("Wochenende").tag("weekend")
-                        Text("Eigene").tag("custom")
+                        Text(L10n.t("Daily")).tag("daily")
+                        Text(L10n.t("Workdays")).tag("workdays")
+                        Text(L10n.t("Weekend")).tag("weekend")
+                        Text(L10n.t("Custom")).tag("custom")
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
@@ -1364,7 +1636,7 @@ struct ContentView: View {
 
                     HStack(spacing: 4) {
                         ForEach([Weekday.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]) { weekday in
-                            Toggle(weekday.rawValue.prefix(2).description, isOn: Binding(
+                            Toggle(weekday.shortTitle, isOn: Binding(
                                 get: { viewModel.jobs[index].selectedWeekdays.contains(weekday) },
                                 set: { _ in viewModel.toggleWeekdayForSelectedJob(weekday) }
                             ))
@@ -1373,39 +1645,41 @@ struct ContentView: View {
                         }
                     }
                 }
+                .disabled(!viewModel.jobs[index].scheduleEnabled)
 
                 HStack(alignment: .top, spacing: 14) {
                     compactTimeControl(
-                        title: "Stunde",
-                        picker: Picker("Stunde", selection: binding(index, \.hourMode)) {
+                        title: L10n.t("Hour"),
+                        picker: Picker(L10n.t("Hour"), selection: binding(index, \.hourMode)) {
                             ForEach(TimeFieldMode.allCases) { mode in
-                                Text(mode.rawValue).tag(mode)
+                                Text(mode.title).tag(mode)
                             }
                         },
                         value: AnyView(hourValueControl(index: index))
                     )
 
                     compactTimeControl(
-                        title: "Minute",
-                        picker: Picker("Minute", selection: binding(index, \.minuteMode)) {
+                        title: L10n.t("Minute"),
+                        picker: Picker(L10n.t("Minute"), selection: binding(index, \.minuteMode)) {
                             ForEach(TimeFieldMode.allCases) { mode in
-                                Text(mode.rawValue).tag(mode)
+                                Text(mode.title).tag(mode)
                             }
                         },
                         value: AnyView(minuteValueControl(index: index))
                     )
                 }
+                .disabled(!viewModel.jobs[index].scheduleEnabled)
 
                 HStack(spacing: 8) {
                     Button {
                         viewModel.addFixedTimeForSelectedJob()
                     } label: {
-                        Label("Uhrzeit", systemImage: "plus")
+                        Label(L10n.t("Time"), systemImage: "plus")
                     }
                     .controlSize(.small)
 
                     if viewModel.jobs[index].fixedTimes.isEmpty {
-                        Text("keine festen Uhrzeiten")
+                        Text(L10n.t("no fixed times"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
@@ -1428,6 +1702,7 @@ struct ContentView: View {
                         }
                     }
                 }
+                .disabled(!viewModel.jobs[index].scheduleEnabled)
 
                 Text(viewModel.jobs[index].scheduleDescription)
                     .font(.callout)
@@ -1479,7 +1754,7 @@ struct ContentView: View {
     private func hourValueControl(index: Int) -> some View {
         switch viewModel.jobs[index].hourMode {
         case .every:
-            Text("jede Stunde")
+            Text(L10n.t("every hour"))
                 .foregroundStyle(.secondary)
         case .specific:
             Stepper(value: binding(index, \.specificHour), in: 0...23) {
@@ -1489,7 +1764,7 @@ struct ContentView: View {
             .frame(width: 150)
         case .interval:
             Stepper(value: binding(index, \.hourInterval), in: 1...23) {
-                Text("alle \(viewModel.jobs[index].hourInterval) h")
+                Text(L10n.f("every %d h", viewModel.jobs[index].hourInterval))
                     .monospacedDigit()
             }
             .frame(width: 150)
@@ -1500,17 +1775,17 @@ struct ContentView: View {
     private func minuteValueControl(index: Int) -> some View {
         switch viewModel.jobs[index].minuteMode {
         case .every:
-            Text("jede Minute")
+            Text(L10n.t("every minute"))
                 .foregroundStyle(.secondary)
         case .specific:
             Stepper(value: binding(index, \.specificMinute), in: 0...59) {
-                Text("Minute \(viewModel.jobs[index].specificMinute)")
+                Text(L10n.f("Minute %d", viewModel.jobs[index].specificMinute))
                     .monospacedDigit()
             }
             .frame(width: 150)
         case .interval:
             Stepper(value: binding(index, \.minuteInterval), in: 1...59) {
-                Text("alle \(viewModel.jobs[index].minuteInterval) min")
+                Text(L10n.f("every %d min", viewModel.jobs[index].minuteInterval))
                     .monospacedDigit()
             }
             .frame(width: 170)
@@ -1518,44 +1793,12 @@ struct ContentView: View {
     }
 
     private func statusSection(index: Int) -> some View {
-        SectionBox(title: "Status") {
+        SectionBox(title: L10n.t("Status")) {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Job aktiv", isOn: binding(index, \.isEnabled))
-                DisclosureGroup("Advanced", isExpanded: $isAdvancedExpanded) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Beim Laden sofort starten", isOn: binding(index, \.runAtLoad))
-
-                        Toggle("Logging aktivieren", isOn: binding(index, \.loggingEnabled))
-
-                        if viewModel.jobs[index].loggingEnabled {
-                            HStack(alignment: .top, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text("Standard Output Log")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    TextField(defaultOutLogPath(for: viewModel.jobs[index]), text: binding(index, \.standardOutPath))
-                                        .textFieldStyle(.roundedBorder)
-                                }
-
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text("Error Log")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    TextField(defaultErrorLogPath(for: viewModel.jobs[index]), text: binding(index, \.standardErrorPath))
-                                        .textFieldStyle(.roundedBorder)
-                                }
-                            }
-
-                            Text("Leere Felder verwenden automatisch die Standardpfade für dieses Backend.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.top, 6)
-                }
+                Toggle(L10n.t("Job enabled"), isOn: binding(index, \.isEnabled))
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(viewModel.jobs[index].backend == .crontab ? "Cron-Zeile" : "LaunchAgent")
+                    Text(viewModel.jobs[index].backend == .crontab ? L10n.t("Cron line") : "LaunchAgent")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(previewText(for: viewModel.jobs[index]))
@@ -1569,22 +1812,97 @@ struct ContentView: View {
         }
     }
 
+    private func advancedSection(index: Int) -> some View {
+        SectionBox(title: L10n.t("Advanced")) {
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    isAdvancedExpanded.toggle()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isAdvancedExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 14)
+                        Text(isAdvancedExpanded ? L10n.t("Hide options") : L10n.t("Show options"))
+                            .foregroundStyle(.primary)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if isAdvancedExpanded {
+                    VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(L10n.t("Arguments"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("--flag value", text: binding(index, \.programArgumentsText))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                            Text(L10n.t("Optional. For LaunchD, these are saved as additional ProgramArguments."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Toggle(L10n.t("Start immediately when loaded"), isOn: binding(index, \.runAtLoad))
+                            .disabled(viewModel.jobs[index].backend == .crontab)
+
+                        if viewModel.jobs[index].backend == .crontab {
+                            Text(L10n.t("RunAtLoad is only available for LaunchAgent and LaunchDaemon jobs."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Toggle(L10n.t("Enable logging"), isOn: binding(index, \.loggingEnabled))
+
+                        if viewModel.jobs[index].loggingEnabled {
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(L10n.t("Standard Output Log"))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    TextField(defaultOutLogPath(for: viewModel.jobs[index]), text: binding(index, \.standardOutPath))
+                                        .textFieldStyle(.roundedBorder)
+                                }
+
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(L10n.t("Error Log"))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    TextField(defaultErrorLogPath(for: viewModel.jobs[index]), text: binding(index, \.standardErrorPath))
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            }
+
+                            Text(L10n.t("Empty fields automatically use the default paths for this backend."))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.leading, 20)
+                }
+            }
+        }
+    }
+
     private var footer: some View {
-        HStack {
+        let selectedIsEditable = viewModel.selectedJob.map(viewModel.isEditable) == true
+
+        return HStack {
             Text(viewModel.statusMessage)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Neu laden") {
+            Button(L10n.t("Reload")) {
                 viewModel.load()
             }
-            Button("Run now") {
+            Button(L10n.t("Run now")) {
                 viewModel.runSelectedNow()
             }
-            .disabled(viewModel.selectedJobID == nil)
-            Button("Speichern") {
+            .disabled(!selectedIsEditable)
+            Button(L10n.t("Save")) {
                 viewModel.save()
             }
             .keyboardShortcut(.defaultAction)
+            .disabled(!selectedIsEditable)
         }
     }
 
@@ -1602,7 +1920,7 @@ struct ContentView: View {
     private func defaultOutLogPath(for job: CronJob) -> String {
         switch job.backend {
         case .crontab:
-            ""
+            job.defaultCronOutLogPath
         case .launchAgent:
             FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Logs")
@@ -1616,7 +1934,7 @@ struct ContentView: View {
     private func defaultErrorLogPath(for job: CronJob) -> String {
         switch job.backend {
         case .crontab:
-            ""
+            job.defaultCronErrorLogPath
         case .launchAgent:
             FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Logs")
@@ -1668,7 +1986,11 @@ struct JobRow: View {
                 Text(job.cronExpressions.first ?? job.cronExpression)
                     .monospacedDigit()
                 Text("·")
-                Text(job.isEnabled ? "aktiv" : "inaktiv")
+                Text(job.isEnabled ? L10n.t("active") : L10n.t("inactive"))
+                if !job.isManaged {
+                    Text("·")
+                    Text(L10n.t("external"))
+                }
             }
             .font(.system(size: 13))
             .foregroundStyle(.secondary)
@@ -1682,22 +2004,22 @@ struct JobRow: View {
 struct BackendHelpView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Ausführungsarten")
+            Text(L10n.t("Execution Types"))
                 .font(.headline)
 
             helpRow(
                 title: "Crontab",
-                text: "Einfacher User-Cronjob. Läuft im User-Kontext. Auf macOS weniger modern als launchd und abhängig davon, dass cron aktiv arbeitet."
+                text: L10n.t("Simple user cron job. Runs in the user context. On macOS it is less modern than launchd and depends on cron being active.")
             )
 
             helpRow(
                 title: "LaunchAgent",
-                text: "Apple-LaunchD-Job für deinen Benutzer. Läuft im Hintergrund, aber nur zuverlässig innerhalb deiner User-Session, also wenn du eingeloggt bist."
+                text: L10n.t("Apple launchd job for your user. Runs in the background, but reliably only inside your user session, meaning while you are logged in.")
             )
 
             helpRow(
                 title: "LaunchDaemon",
-                text: "Systemweiter LaunchD-Job. Läuft auch ohne eingeloggten Benutzer und ist passend für Server-/Mac-mini-Hintergrundjobs. Benötigt Admin-Rechte."
+                text: L10n.t("System-wide launchd job. Runs even without a logged-in user and fits server or Mac mini background jobs. Requires admin rights.")
             )
         }
         .padding(16)
