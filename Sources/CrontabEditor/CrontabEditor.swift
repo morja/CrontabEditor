@@ -396,17 +396,35 @@ final class CrontabViewModel: ObservableObject {
     }
 
     func load() {
+        let previousSelectedID = selectedJobID
+        let previousSelectionKey = selectedJob.map(selectionKey)
+
         do {
             let document = try manager.load()
             let launchAgentJobs = try launchAgentManager.load()
             let launchDaemonJobs = try launchDaemonManager.load()
             jobs = document.jobs + launchAgentJobs + launchDaemonJobs
             preservedLines = document.preservedLines
-            selectedJobID = jobs.first?.id
+            if let previousSelectedID, jobs.contains(where: { $0.id == previousSelectedID }) {
+                selectedJobID = previousSelectedID
+            } else if let previousSelectionKey,
+                      let matchingJob = jobs.first(where: { selectionKey(for: $0) == previousSelectionKey }) {
+                selectedJobID = matchingJob.id
+            } else {
+                selectedJobID = jobs.first?.id
+            }
             statusMessage = jobs.isEmpty ? L10n.t("No cron jobs found.") : L10n.f("%d cron job(s) loaded.", jobs.count)
         } catch {
             statusMessage = L10n.f("Could not read crontab: %@", error.localizedDescription)
         }
+    }
+
+    private func selectionKey(for job: CronJob) -> String {
+        if job.backend == .crontab {
+            return "crontab|\(job.isManaged)|\(job.name)|\(job.originalCommand ?? job.cronLine)"
+        }
+
+        return "\(job.backend.rawValue)|\(job.label)"
     }
 
     func addJob() {
