@@ -23,7 +23,7 @@ jobs:
           subject="${{ github.event.head_commit.message }}"
           subject="${subject%%$'\n'*}"
 
-          if [[ "$subject" =~ ^(fix|feat)(\(.+\))?!?: ]] || [[ "$subject" =~ ^[a-zA-Z]+(\(.+\))!: ]]; then
+          if [[ "$subject" =~ ^(fix|feat)(\(.+\))?!?: ]] || [[ "$subject" =~ ^[a-zA-Z]+(\(.+\))?!: ]]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
             echo "release=false" >> "$GITHUB_OUTPUT"
@@ -34,9 +34,47 @@ jobs:
       - name: Checkout
         if: steps.trigger.outputs.release == 'true'
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release version
+        if: steps.trigger.outputs.release == 'true'
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          subject="${{ steps.trigger.outputs.subject }}"
+          latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+
+          if [[ -z "$latest_tag" ]]; then
+            next_version="1.0.0"
+          else
+            version="${latest_tag#v}"
+            IFS=. read -r major minor patch <<< "$version"
+
+            if [[ "$subject" =~ ^[a-zA-Z]+(\(.+\))?!: ]]; then
+              major=$((major + 1))
+              minor=0
+              patch=0
+            elif [[ "$subject" =~ ^feat(\(.+\))?!?: ]]; then
+              minor=$((minor + 1))
+              patch=0
+            else
+              patch=$((patch + 1))
+            fi
+
+            next_version="$major.$minor.$patch"
+          fi
+
+          echo "version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$next_version" >> "$GITHUB_OUTPUT"
 
       - name: Build app zip
         if: steps.trigger.outputs.release == 'true'
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: Scripts/build-app.sh release
 
       - name: Create GitHub release
@@ -44,14 +82,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT_SUBJECT: ${{ steps.trigger.outputs.subject }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
 
-          short_sha="$(git rev-parse --short HEAD)"
-          tag="release-$short_sha"
-
-          gh release create "$tag" \
+          gh release create "$RELEASE_TAG" \
             .build/CrontabEditor.zip \
             --target "$GITHUB_SHA" \
-            --title "Crontab Editor $short_sha" \
+            --title "$RELEASE_TAG" \
             --notes "Automated release for: $COMMIT_SUBJECT"

@@ -7,7 +7,7 @@ A minimal native macOS SwiftUI editor for user cron jobs, LaunchAgents, and Laun
 Crontab Editor is a native macOS app.
 
 - macOS 14 Sonoma or newer
-- Apple Silicon and Intel Macs, as long as Swift/SwiftPM is available for the target platform
+- Apple Silicon and Intel Macs
 - Local user crontabs through `/usr/bin/crontab`
 - User LaunchAgents under `~/Library/LaunchAgents`
 - System LaunchDaemons under `/Library/LaunchDaemons`
@@ -15,13 +15,46 @@ Crontab Editor is a native macOS app.
 
 Linux, Windows, iOS, and iPadOS are not supported. The app depends on AppKit, SwiftUI for macOS, `launchctl`, `osascript`, and the macOS launchd directory layout.
 
-## Requirements
+## Download and Install
 
-- Xcode or Apple Command Line Tools with Swift 6.3 or newer
+For normal use, download the latest `CrontabEditor.zip` from the GitHub Releases page:
+
+https://github.com/morja/CrontabEditor/releases
+
+Then:
+
+1. Unzip `CrontabEditor.zip`.
+2. Move `CrontabEditor.app` to `/Applications`.
+3. Open the app.
+
+If macOS blocks the first launch because the app was downloaded from the internet, open **System Settings > Privacy & Security** and allow the app there.
+
+If macOS still refuses to open the app, remove the quarantine attribute:
+
+```sh
+sudo xattr -dr com.apple.quarantine /Applications/CrontabEditor.app
+open /Applications/CrontabEditor.app
+```
+
+The downloadable app is ad-hoc signed, not notarized. That means it can run, but macOS may still show Gatekeeper warnings on first launch. A fully public distribution would need Apple Developer ID signing and notarization.
+
+You do not need Xcode, Swift, or SwiftPM to use the downloaded app.
+
+## Runtime Permissions
+
+- Editing normal crontab jobs uses your user account.
+- Creating or changing LaunchAgents uses your user account.
+- Creating, changing, loading, or starting LaunchDaemons requires an admin password because they are installed under `/Library/LaunchDaemons` and can run without a user being logged in.
+
+## Build Requirements
+
+These are only needed if you want to build the app yourself from source:
+
+- Xcode or Apple Command Line Tools with Swift 6.1 or newer
 - Terminal access to `swift`, `crontab`, `launchctl`, `codesign`, and `ditto`
 - Admin rights when creating, changing, loading, or starting LaunchDaemons
 
-## Run
+## Build from Source
 
 ```sh
 swift run
@@ -65,6 +98,7 @@ The ZIP is created with `ditto --keepParent` so the bundle structure and executa
 - Name each job; launchd uses that name to create a stable ID like `local.crontabeditor.my-job`
 - Enter the script path manually or choose it with a file picker
 - Add optional ProgramArguments; launchd stores them as a real `ProgramArguments` array
+- Optionally run a script through `/bin/sh`, `/bin/bash`, `/bin/zsh`, or a custom shell/interpreter path
 - Use the custom macOS app icon in the bundle
 - Configure flexible schedules:
   - multiple weekdays, including workday and weekend presets

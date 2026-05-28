@@ -3,6 +3,8 @@ set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${1:-release}"
+APP_VERSION="${APP_VERSION:-1.0.0}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP_DIR="$ROOT_DIR/.build/CrontabEditor.app"
 ZIP_PATH="$ROOT_DIR/.build/CrontabEditor.zip"
 CONTENTS_DIR="$APP_DIR/Contents"
@@ -23,7 +25,7 @@ if [ -d "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" ]; then
     cp -R "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" "$RESOURCES_DIR/"
 fi
 
-cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
+cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -39,9 +41,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
