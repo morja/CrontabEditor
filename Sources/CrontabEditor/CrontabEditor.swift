@@ -566,7 +566,6 @@ struct CrontabManager {
                     jobs.append(managedJob)
                 } else {
                     jobs.append(job)
-                    preservedLines.append(line)
                 }
             } else if !insideOldManagedBlock {
                 preservedLines.append(line)
@@ -620,11 +619,15 @@ struct CrontabManager {
         let command = parts[5]
         let commandParts = parseCommand(command)
         let scriptPath = commandParts.first ?? unquote(command)
+        let parsedCommand = parseCronCommandParts(commandParts)
         var job = CronJob.blank()
         job.backend = .crontab
         job.isManaged = false
         job.scriptPath = scriptPath
-        job.programArgumentsText = commandParts.dropFirst().map(shellEscaped).joined(separator: " ")
+        job.programArgumentsText = parsedCommand.arguments.map(shellEscaped).joined(separator: " ")
+        job.loggingEnabled = parsedCommand.outLogPath != nil || parsedCommand.errorLogPath != nil
+        job.standardOutPath = parsedCommand.outLogPath ?? ""
+        job.standardErrorPath = parsedCommand.errorLogPath ?? ""
         job.name = URL(fileURLWithPath: scriptPath).lastPathComponent
         job.label = CronJob.label(for: job.name)
         job.isEnabled = isEnabled
@@ -633,6 +636,34 @@ struct CrontabManager {
         applyHour(parts[1], to: &job)
         job.selectedWeekdays = parseWeekdays(parts[4])
         return job
+    }
+
+    private func parseCronCommandParts(_ commandParts: [String]) -> (arguments: [String], outLogPath: String?, errorLogPath: String?) {
+        var arguments: [String] = []
+        var outLogPath: String?
+        var errorLogPath: String?
+        var index = 1
+
+        while index < commandParts.count {
+            let part = commandParts[index]
+
+            if part == ">>", index + 1 < commandParts.count {
+                outLogPath = commandParts[index + 1]
+                index += 2
+                continue
+            }
+
+            if part == "2>>", index + 1 < commandParts.count {
+                errorLogPath = commandParts[index + 1]
+                index += 2
+                continue
+            }
+
+            arguments.append(part)
+            index += 1
+        }
+
+        return (arguments, outLogPath, errorLogPath)
     }
 
     private func parseWeekdays(_ value: String) -> [Weekday] {
