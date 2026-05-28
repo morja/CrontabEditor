@@ -35,6 +35,15 @@ struct CrontabEditorApp: App {
         Settings {
             SettingsView()
         }
+        .commands {
+            CommandGroup(replacing: .help) {
+                Button(L10n.t("Crontab Editor Help")) {
+                    if let url = URL(string: "https://github.com/morja/CrontabEditor#readme") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
     }
 }
 
