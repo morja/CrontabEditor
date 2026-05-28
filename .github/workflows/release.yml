@@ -1,0 +1,57 @@
+name: Build Release Zip
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-latest
+
+    steps:
+      - name: Check release trigger
+        id: trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          subject="${{ github.event.head_commit.message }}"
+          subject="${subject%%$'\n'*}"
+
+          if [[ "$subject" =~ ^(fix|feat)(\(.+\))?!?: ]] || [[ "$subject" =~ ^[a-zA-Z]+(\(.+\))!: ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.trigger.outputs.release == 'true'
+        uses: actions/checkout@v4
+
+      - name: Build app zip
+        if: steps.trigger.outputs.release == 'true'
+        run: Scripts/build-app.sh release
+
+      - name: Create GitHub release
+        if: steps.trigger.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SUBJECT: ${{ steps.trigger.outputs.subject }}
+        run: |
+          set -euo pipefail
+
+          short_sha="$(git rev-parse --short HEAD)"
+          tag="release-$short_sha"
+
+          gh release create "$tag" \
+            .build/CrontabEditor.zip \
+            --target "$GITHUB_SHA" \
+            --title "Crontab Editor $short_sha" \
+            --notes "Automated release for: $COMMIT_SUBJECT"
