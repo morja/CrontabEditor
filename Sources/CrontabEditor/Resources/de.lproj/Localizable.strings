@@ -91,6 +91,11 @@
 "Wednesday.short" = "Mi";
 "Weekend" = "Wochenende";
 "Workdays" = "Werktage";
+"Before every crontab save, the previous crontab is written to this folder." = "Vor jedem Speichern der Crontab wird die vorherige Crontab in diesen Ordner geschrieben.";
+"Crontab Backups" = "Crontab-Backups";
+"Jobs saved. Backup: %@" = "Jobs gespeichert. Backup: %@";
+"Open Backup Folder" = "Backup-Ordner oeffnen";
+"Settings" = "Einstellungen";
 "every %d h" = "alle %d h";
 "every %d hours" = "alle %d Stunden";
 "every %d min" = "alle %d min";

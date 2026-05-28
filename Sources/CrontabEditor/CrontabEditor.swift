@@ -31,6 +31,10 @@ struct CrontabEditorApp: App {
                 .frame(minWidth: 940, minHeight: 620)
         }
         .windowStyle(.titleBar)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
@@ -545,10 +549,10 @@ final class CrontabViewModel: ObservableObject {
         invalidJobIDs.removeAll()
 
         do {
-            try manager.save(jobs: jobs.filter { $0.backend == .crontab }, preservedLines: preservedLines)
+            let backupURL = try manager.save(jobs: jobs.filter { $0.backend == .crontab }, preservedLines: preservedLines)
             try launchAgentManager.save(jobs: jobs.filter { $0.backend == .launchAgent && $0.isManaged })
             try launchDaemonManager.save(jobs: jobs.filter { $0.backend == .launchDaemon && $0.isManaged })
-            statusMessage = L10n.t("Jobs saved.")
+            statusMessage = L10n.f("Jobs saved. Backup: %@", backupURL.lastPathComponent)
         } catch {
             statusMessage = L10n.f("Save failed: %@", error.localizedDescription)
         }
@@ -637,6 +641,13 @@ struct CrontabManager {
     private let endMarker = "# CrontabEditor END"
     private let jobMarkerPrefix = "# CrontabEditor JOB "
 
+    static var backupDirectory: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CrontabEditor", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+    }
+
     func load() throws -> CrontabDocument {
         parse(crontab: try readCrontab())
     }
@@ -683,8 +694,12 @@ struct CrontabManager {
         return CrontabDocument(jobs: jobs, preservedLines: trimmedTrailingEmptyLines(preservedLines))
     }
 
-    func save(jobs: [CronJob], preservedLines: [String]) throws {
+    @discardableResult
+    func save(jobs: [CronJob], preservedLines: [String]) throws -> URL {
+        let currentCrontab = try readCrontab()
+        let backupURL = try backup(crontab: currentCrontab)
         try install(crontab: render(jobs: jobs, preservedLines: preservedLines))
+        return backupURL
     }
 
     func render(jobs: [CronJob], preservedLines: [String]) -> String {
@@ -714,6 +729,38 @@ struct CrontabManager {
 
     private func install(crontab: String) throws {
         _ = try run("/usr/bin/crontab", arguments: ["-"], standardInput: crontab)
+    }
+
+    private func backup(crontab: String) throws -> URL {
+        let directory = Self.backupDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+
+        let url = directory.appendingPathComponent("crontab-\(formatter.string(from: Date()))-\(UUID().uuidString).backup")
+        try crontab.write(to: url, atomically: true, encoding: .utf8)
+        try pruneBackups(in: directory, keeping: 10)
+        return url
+    }
+
+    private func pruneBackups(in directory: URL, keeping limit: Int) throws {
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.lastPathComponent.hasPrefix("crontab-") && $0.pathExtension == "backup" }
+        .sorted { lhs, rhs in
+            let leftDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rightDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return leftDate > rightDate
+        }
+
+        for backup in backups.dropFirst(limit) {
+            try FileManager.default.removeItem(at: backup)
+        }
     }
 
     private func parse(line: String) -> CronJob? {
@@ -2245,6 +2292,45 @@ struct SectionBox<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+}
+
+struct SettingsView: View {
+    private var backupPath: String {
+        CrontabManager.backupDirectory.path
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L10n.t("Settings"))
+                .font(.title2.bold())
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.t("Crontab Backups"))
+                    .font(.headline)
+                Text(L10n.t("Before every crontab save, the previous crontab is written to this folder."))
+                    .foregroundStyle(.secondary)
+                Text(backupPath)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+                Button(L10n.t("Open Backup Folder")) {
+                    openBackupFolder()
+                }
+            }
+
+            Spacer()
+        }
+        .padding(22)
+        .frame(width: 560, height: 260)
+    }
+
+    private func openBackupFolder() {
+        try? FileManager.default.createDirectory(at: CrontabManager.backupDirectory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(CrontabManager.backupDirectory)
     }
 }
 

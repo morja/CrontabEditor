@@ -48,6 +48,16 @@ You do not need Xcode, Swift, or SwiftPM to use the downloaded app.
 - Creating or changing LaunchAgents uses your user account.
 - Creating, changing, loading, or starting LaunchDaemons requires an admin password because they are installed under `/Library/LaunchDaemons` and can run without a user being logged in.
 
+## Crontab Backups
+
+Before every crontab save, Crontab Editor writes a backup of the previous user crontab to:
+
+```text
+~/Library/Application Support/CrontabEditor/Backups
+```
+
+Backups are named like `crontab-20260528-153000-UUID.backup`. Crontab Editor keeps the 10 newest backups and removes older ones automatically. The folder can also be opened from the app through **Crontab Editor > Settings > Open Backup Folder**.
+
 ## Build Requirements
 
 These are only needed if you want to build the app yourself from source:
@@ -110,6 +120,7 @@ The ZIP is created with `ditto --keepParent` so the bundle structure and executa
 - Use `RunAtLoad` to start immediately when loaded
 - Use `Run now` to start the selected job immediately
 - Use advanced settings for optional logging and labeled stdout/stderr log paths
+- Create an automatic backup before every crontab save
 - Enable or disable jobs
 - Disable the schedule so a job only starts through `RunAtLoad` or `Run now`
 - Preview the cron line before saving

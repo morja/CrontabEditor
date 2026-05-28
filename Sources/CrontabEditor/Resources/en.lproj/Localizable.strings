@@ -6,3 +6,8 @@
 "Thursday.short" = "Thu";
 "Tuesday.short" = "Tue";
 "Wednesday.short" = "Wed";
+"Before every crontab save, the previous crontab is written to this folder." = "Before every crontab save, the previous crontab is written to this folder.";
+"Crontab Backups" = "Crontab Backups";
+"Jobs saved. Backup: %@" = "Jobs saved. Backup: %@";
+"Open Backup Folder" = "Open Backup Folder";
+"Settings" = "Settings";
