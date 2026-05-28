@@ -244,6 +244,7 @@ final class CrontabViewModel: ObservableObject {
     @Published var jobs: [CronJob] = []
     @Published var selectedJobID: CronJob.ID?
     @Published var statusMessage = "Noch nicht geladen."
+    @Published var invalidJobIDs: Set<CronJob.ID> = []
 
     private let manager = CrontabManager()
     private let launchAgentManager = LaunchAgentManager()
@@ -294,9 +295,14 @@ final class CrontabViewModel: ObservableObject {
 
     func save() {
         guard canSave else {
+            invalidJobIDs = Set(jobs
+                .filter { $0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .map(\.id))
+            selectedJobID = invalidJobIDs.first ?? selectedJobID
             statusMessage = "Alle Jobs brauchen einen Script-Pfad."
             return
         }
+        invalidJobIDs.removeAll()
 
         do {
             try manager.save(jobs: jobs.filter { $0.backend == .crontab }, preservedLines: preservedLines)
@@ -338,6 +344,7 @@ final class CrontabViewModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             jobs[selectedIndex].scriptPath = url.path
             jobs[selectedIndex].originalCommand = nil
+            invalidJobIDs.remove(jobs[selectedIndex].id)
         }
     }
 
@@ -1295,15 +1302,32 @@ struct ContentView: View {
 
     private func scriptSection(index: Int) -> some View {
         SectionBox(title: "Script") {
-            HStack(spacing: 10) {
-                TextField("/Users/mathis/bin/backup.sh", text: binding(index, \.scriptPath))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: viewModel.jobs[index].scriptPath) {
-                        viewModel.updateSelectedJob { $0.originalCommand = nil }
+            let isInvalid = viewModel.invalidJobIDs.contains(viewModel.jobs[index].id)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 10) {
+                    TextField("/Users/mathis/bin/backup.sh", text: binding(index, \.scriptPath))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isInvalid ? Color.red : Color.clear, lineWidth: 2)
+                        }
+                        .onChange(of: viewModel.jobs[index].scriptPath) {
+                            viewModel.updateSelectedJob {
+                                $0.originalCommand = nil
+                                viewModel.invalidJobIDs.remove($0.id)
+                            }
+                        }
+                    Button("Auswählen") {
+                        viewModel.chooseScriptForSelectedJob()
                     }
-                Button("Auswählen") {
-                    viewModel.chooseScriptForSelectedJob()
+                }
+
+                if isInvalid {
+                    Text("Script-Pfad fehlt. Bitte Datei auswählen oder Pfad eintragen.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
                 }
             }
         }
