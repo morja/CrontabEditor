@@ -102,6 +102,24 @@ enum JobBackend: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ShellInterpreter: String, CaseIterable, Identifiable {
+    case sh = "/bin/sh"
+    case bash = "/bin/bash"
+    case zsh = "/bin/zsh"
+    case custom = "custom"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sh: "sh"
+        case .bash: "bash"
+        case .zsh: "zsh"
+        case .custom: L10n.t("Custom")
+        }
+    }
+}
+
 struct CronJob: Identifiable, Equatable {
     var id = UUID()
     var name: String
@@ -109,6 +127,9 @@ struct CronJob: Identifiable, Equatable {
     var backend: JobBackend
     var scriptPath: String
     var programArgumentsText: String
+    var useInterpreter: Bool
+    var interpreterPath: String
+    var interpreterArgumentsText: String
     var minuteMode: TimeFieldMode
     var specificMinute: Int
     var minuteInterval: Int
@@ -135,6 +156,9 @@ struct CronJob: Identifiable, Equatable {
             backend: .crontab,
             scriptPath: "",
             programArgumentsText: "",
+            useInterpreter: false,
+            interpreterPath: ShellInterpreter.zsh.rawValue,
+            interpreterArgumentsText: "",
             minuteMode: .every,
             specificMinute: 0,
             minuteInterval: 15,
@@ -195,7 +219,7 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var command: String {
-        let base = ([scriptPath] + programArguments).map(shellEscaped).joined(separator: " ")
+        let base = launchdProgramArguments.map(shellEscaped).joined(separator: " ")
         guard loggingEnabled else {
             return base
         }
@@ -209,8 +233,20 @@ struct CronJob: Identifiable, Equatable {
         parseArguments(programArgumentsText)
     }
 
+    var interpreterArguments: [String] {
+        parseArguments(interpreterArgumentsText)
+    }
+
+    var executablePath: String {
+        useInterpreter ? interpreterPath : scriptPath
+    }
+
     var launchdProgramArguments: [String] {
-        [scriptPath] + programArguments
+        if useInterpreter {
+            return [interpreterPath] + interpreterArguments + [scriptPath] + programArguments
+        }
+
+        return [scriptPath] + programArguments
     }
 
     var defaultCronOutLogPath: String {
@@ -352,6 +388,37 @@ struct CrontabDocument {
     var preservedLines: [String]
 }
 
+fileprivate func applyProgramArguments(_ arguments: [String], to job: inout CronJob) {
+    guard let first = arguments.first else { return }
+
+    if isKnownInterpreter(first), let scriptIndex = arguments.dropFirst().firstIndex(where: { !$0.hasPrefix("-") }) {
+        job.useInterpreter = true
+        job.interpreterPath = first
+        job.interpreterArgumentsText = arguments[1..<scriptIndex].map(quoteArgument).joined(separator: " ")
+        job.scriptPath = arguments[scriptIndex]
+        job.programArgumentsText = arguments.dropFirst(scriptIndex + 1).map(quoteArgument).joined(separator: " ")
+    } else {
+        job.useInterpreter = false
+        job.scriptPath = first
+        job.programArgumentsText = arguments.dropFirst().map(quoteArgument).joined(separator: " ")
+    }
+}
+
+fileprivate func quoteArgument(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+fileprivate func isKnownInterpreter(_ value: String) -> Bool {
+    if (ShellInterpreter.allCases
+        .filter { $0 != .custom }
+        .map(\.rawValue)
+        .contains(value)) {
+        return true
+    }
+
+    return ["sh", "bash", "zsh", "fish"].contains(URL(fileURLWithPath: value).lastPathComponent)
+}
+
 @MainActor
 final class CrontabViewModel: ObservableObject {
     @Published var jobs: [CronJob] = []
@@ -376,7 +443,10 @@ final class CrontabViewModel: ObservableObject {
     }
 
     var canSave: Bool {
-        jobs.filter(isEditable).allSatisfy { !$0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        jobs.filter(isEditable).allSatisfy {
+            !$0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && (!$0.useInterpreter || !$0.interpreterPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
     }
 
     var managedJobs: [CronJob] {
@@ -449,10 +519,13 @@ final class CrontabViewModel: ObservableObject {
         guard canSave else {
             invalidJobIDs = Set(jobs
                 .filter(isEditable)
-                .filter { $0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .filter {
+                    $0.scriptPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || ($0.useInterpreter && $0.interpreterPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
                 .map(\.id))
             selectedJobID = invalidJobIDs.first ?? selectedJobID
-            statusMessage = L10n.t("All jobs need a script path.")
+            statusMessage = L10n.t("All jobs need a script path and selected interpreter path.")
             return
         }
         invalidJobIDs.removeAll()
@@ -473,7 +546,7 @@ final class CrontabViewModel: ObservableObject {
         do {
             switch selectedJob.backend {
             case .crontab:
-                try ScriptRunner.run(path: selectedJob.scriptPath, arguments: selectedJob.programArguments)
+                try ScriptRunner.run(path: selectedJob.executablePath, arguments: Array(selectedJob.launchdProgramArguments.dropFirst()))
             case .launchAgent:
                 try launchAgentManager.runNow(selectedJob)
             case .launchDaemon:
@@ -651,17 +724,15 @@ struct CrontabManager {
             return nil
         }
 
-        let scriptPath = commandParts.first ?? unquote(command)
         let parsedCommand = parseCronCommandParts(commandParts)
         var job = CronJob.blank()
         job.backend = .crontab
         job.isManaged = false
-        job.scriptPath = scriptPath
-        job.programArgumentsText = parsedCommand.arguments.map(shellEscaped).joined(separator: " ")
+        applyProgramArguments(parsedCommand.arguments, to: &job)
         job.loggingEnabled = parsedCommand.outLogPath != nil || parsedCommand.errorLogPath != nil
         job.standardOutPath = parsedCommand.outLogPath ?? ""
         job.standardErrorPath = parsedCommand.errorLogPath ?? ""
-        job.name = URL(fileURLWithPath: scriptPath).lastPathComponent
+        job.name = URL(fileURLWithPath: job.scriptPath).lastPathComponent
         job.label = CronJob.label(for: job.name)
         job.isEnabled = isEnabled
         job.originalCommand = nil
@@ -675,7 +746,7 @@ struct CrontabManager {
         var arguments: [String] = []
         var outLogPath: String?
         var errorLogPath: String?
-        var index = 1
+        var index = 0
 
         while index < commandParts.count {
             let part = commandParts[index]
@@ -699,9 +770,41 @@ struct CrontabManager {
         return (arguments, outLogPath, errorLogPath)
     }
 
+    private func applyProgramArguments(_ arguments: [String], to job: inout CronJob) {
+        guard let first = arguments.first else { return }
+
+        if isKnownInterpreter(first), let scriptIndex = arguments.dropFirst().firstIndex(where: { !$0.hasPrefix("-") }) {
+            job.useInterpreter = true
+            job.interpreterPath = first
+            job.interpreterArgumentsText = arguments[1..<scriptIndex].map(shellEscaped).joined(separator: " ")
+            job.scriptPath = arguments[scriptIndex]
+            job.programArgumentsText = arguments.dropFirst(scriptIndex + 1).map(shellEscaped).joined(separator: " ")
+        } else {
+            job.useInterpreter = false
+            job.scriptPath = first
+            job.programArgumentsText = arguments.dropFirst().map(shellEscaped).joined(separator: " ")
+        }
+    }
+
+    private func isKnownInterpreter(_ value: String) -> Bool {
+        if (ShellInterpreter.allCases
+            .filter { $0 != .custom }
+            .map(\.rawValue)
+            .contains(value)) {
+            return true
+        }
+
+        return ["sh", "bash", "zsh", "fish"].contains(URL(fileURLWithPath: value).lastPathComponent)
+    }
+
     private func isSupportedCronCommandParts(_ commandParts: [String]) -> Bool {
         guard let executable = commandParts.first,
-              executable.hasPrefix("/") || executable.hasPrefix("~/") || executable.hasPrefix("./") || executable.hasPrefix("../") else {
+              !executable.isEmpty,
+              !isShellControlToken(executable),
+              !executable.contains("="),
+              !executable.hasPrefix(">"),
+              !executable.hasPrefix("2>"),
+              !executable.hasPrefix("&>") else {
             return false
         }
 
@@ -945,7 +1048,7 @@ struct LaunchAgentManager {
             let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let label = plist["Label"] as? String,
             let arguments = plist["ProgramArguments"] as? [String],
-            let scriptPath = arguments.first
+            !arguments.isEmpty
         else {
             return nil
         }
@@ -955,8 +1058,7 @@ struct LaunchAgentManager {
         job.label = label
         job.isManaged = label.hasPrefix(prefix)
         job.name = job.isManaged ? displayName(from: label) : label
-        job.scriptPath = scriptPath
-        job.programArgumentsText = arguments.dropFirst().map(shellEscaped).joined(separator: " ")
+        applyProgramArguments(arguments, to: &job)
         job.isEnabled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
@@ -1248,7 +1350,7 @@ struct LaunchDaemonManager {
             let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
             let label = plist["Label"] as? String,
             let arguments = plist["ProgramArguments"] as? [String],
-            let scriptPath = arguments.first
+            !arguments.isEmpty
         else {
             return nil
         }
@@ -1258,8 +1360,7 @@ struct LaunchDaemonManager {
         job.label = label
         job.isManaged = label.hasPrefix(prefix)
         job.name = job.isManaged ? displayName(from: label) : label
-        job.scriptPath = scriptPath
-        job.programArgumentsText = arguments.dropFirst().map(shellEscaped).joined(separator: " ")
+        applyProgramArguments(arguments, to: &job)
         job.isEnabled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
@@ -1931,6 +2032,50 @@ struct ContentView: View {
 
                 if isAdvancedExpanded {
                     VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(L10n.t("Run with interpreter"), isOn: binding(index, \.useInterpreter))
+
+                            if viewModel.jobs[index].useInterpreter {
+                                HStack(alignment: .top, spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(L10n.t("Interpreter"))
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                        Picker(L10n.t("Interpreter"), selection: interpreterSelectionBinding(index)) {
+                                            ForEach(ShellInterpreter.allCases) { interpreter in
+                                                Text(interpreter.title).tag(interpreter)
+                                            }
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .labelsHidden()
+                                    }
+
+                                    if selectedInterpreter(for: viewModel.jobs[index]) == .custom {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(L10n.t("Custom Path"))
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            TextField("/opt/homebrew/bin/bash", text: binding(index, \.interpreterPath))
+                                                .textFieldStyle(.roundedBorder)
+                                                .font(.system(.body, design: .monospaced))
+                                        }
+                                    }
+                                }
+
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(L10n.t("Interpreter Arguments"))
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    TextField("-l", text: binding(index, \.interpreterArgumentsText))
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(.body, design: .monospaced))
+                                    Text(L10n.t("Optional. Example: -l for a login shell."))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
                         VStack(alignment: .leading, spacing: 5) {
                             Text(L10n.t("Arguments"))
                                 .font(.caption.weight(.semibold))
@@ -2050,6 +2195,24 @@ struct ContentView: View {
             get: { viewModel.jobs[index][keyPath: keyPath] },
             set: { value in
                 viewModel.jobs[index][keyPath: keyPath] = value
+            }
+        )
+    }
+
+    private func selectedInterpreter(for job: CronJob) -> ShellInterpreter {
+        ShellInterpreter.allCases.first { $0.rawValue == job.interpreterPath } ?? .custom
+    }
+
+    private func interpreterSelectionBinding(_ index: Int) -> Binding<ShellInterpreter> {
+        Binding(
+            get: { selectedInterpreter(for: viewModel.jobs[index]) },
+            set: { interpreter in
+                guard viewModel.jobs.indices.contains(index) else { return }
+                if interpreter == .custom {
+                    viewModel.jobs[index].interpreterPath = ""
+                } else {
+                    viewModel.jobs[index].interpreterPath = interpreter.rawValue
+                }
             }
         )
     }

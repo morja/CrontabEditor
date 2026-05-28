@@ -45,6 +45,72 @@ struct CrontabManagerTests {
         #expect(rendered == input)
     }
 
+    @Test func parsesBareCommandCronJobWithArgumentsAndLogging() throws {
+        let input = "* * * * * 'test' 'tet' 'asd' >> '/Users/mathis/Library/Logs/local.crontabeditor.test.out.log' 2>> '/Users/mathis/Library/Logs/local.crontabeditor.test.err.log'\n"
+
+        let manager = CrontabManager()
+        let document = manager.parse(crontab: input)
+        let job = try #require(document.jobs.first)
+
+        #expect(document.jobs.count == 1)
+        #expect(document.preservedLines.isEmpty)
+        #expect(job.scriptPath == "test")
+        #expect(job.programArguments == ["tet", "asd"])
+        #expect(job.loggingEnabled)
+        #expect(job.standardOutPath == "/Users/mathis/Library/Logs/local.crontabeditor.test.out.log")
+        #expect(job.standardErrorPath == "/Users/mathis/Library/Logs/local.crontabeditor.test.err.log")
+
+        let rendered = manager.render(jobs: document.jobs, preservedLines: document.preservedLines)
+        #expect(rendered == input)
+    }
+
+    @Test func parsesAndRendersCronJobWithInterpreter() throws {
+        let input = "* * * * * /bin/bash -l '/Users/mathis/bin/test script.sh' '--name=A B'\n"
+
+        let manager = CrontabManager()
+        let document = manager.parse(crontab: input)
+        let job = try #require(document.jobs.first)
+
+        #expect(job.useInterpreter)
+        #expect(job.interpreterPath == "/bin/bash")
+        #expect(job.interpreterArguments == ["-l"])
+        #expect(job.scriptPath == "/Users/mathis/bin/test script.sh")
+        #expect(job.programArguments == ["--name=A B"])
+
+        let rendered = manager.render(jobs: document.jobs, preservedLines: document.preservedLines)
+        #expect(rendered == "* * * * * '/bin/bash' '-l' '/Users/mathis/bin/test script.sh' '--name=A B'\n")
+    }
+
+    @Test func parsesCustomShellPathAsInterpreter() throws {
+        let input = "* * * * * /opt/homebrew/bin/bash '/Users/mathis/bin/test.sh'\n"
+
+        let document = CrontabManager().parse(crontab: input)
+        let job = try #require(document.jobs.first)
+
+        #expect(job.useInterpreter)
+        #expect(job.interpreterPath == "/opt/homebrew/bin/bash")
+        #expect(job.scriptPath == "/Users/mathis/bin/test.sh")
+    }
+
+    @Test func rendersManagedCronJobWithInterpreter() {
+        var job = CronJob.blank()
+        job.name = "Shell Job"
+        job.label = CronJob.label(for: job.name)
+        job.scriptPath = "/Users/mathis/bin/shell-job.sh"
+        job.useInterpreter = true
+        job.interpreterPath = "/bin/zsh"
+        job.interpreterArgumentsText = "-l"
+        job.programArgumentsText = "--flag value"
+
+        let rendered = CrontabManager().render(jobs: [job], preservedLines: [])
+
+        #expect(rendered == """
+        # CrontabEditor JOB Shell Job
+        * * * * * '/bin/zsh' '-l' '/Users/mathis/bin/shell-job.sh' '--flag' 'value'
+
+        """)
+    }
+
     @Test func preservesComplexLinesAroundManagedJobs() {
         let input = """
         PATH=/opt/homebrew/bin:/usr/bin:/bin
