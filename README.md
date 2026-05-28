@@ -2,6 +2,8 @@
 
 A minimal native macOS SwiftUI editor for user cron jobs, LaunchAgents, and LaunchDaemons.
 
+![Crontab Editor screenshot](Assets/screenshot.jpg)
+
 ## Supported Systems
 
 Crontab Editor is a native macOS app.
