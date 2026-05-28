@@ -551,7 +551,10 @@ struct CrontabManager {
     private let jobMarkerPrefix = "# CrontabEditor JOB "
 
     func load() throws -> CrontabDocument {
-        let crontab = try readCrontab()
+        parse(crontab: try readCrontab())
+    }
+
+    func parse(crontab: String) -> CrontabDocument {
         var jobs: [CronJob] = []
         var preservedLines: [String] = []
         var insideOldManagedBlock = false
@@ -594,6 +597,10 @@ struct CrontabManager {
     }
 
     func save(jobs: [CronJob], preservedLines: [String]) throws {
+        try install(crontab: render(jobs: jobs, preservedLines: preservedLines))
+    }
+
+    func render(jobs: [CronJob], preservedLines: [String]) -> String {
         let jobLines = jobs.flatMap { job in
             job.isManaged ? ["\(jobMarkerPrefix)\(job.name)"] + job.cronLines : job.cronLines
         }
@@ -604,8 +611,7 @@ struct CrontabManager {
         }
 
         lines.append(contentsOf: jobLines)
-        let crontab = lines.joined(separator: "\n") + "\n"
-        try install(crontab: crontab)
+        return lines.joined(separator: "\n") + "\n"
     }
 
     private func readCrontab() throws -> String {
@@ -630,12 +636,21 @@ struct CrontabManager {
         let isEnabled = !trimmed.hasPrefix("#")
         let activeLine = isEnabled ? trimmed : trimmed.replacing(/^#\s*/, with: "")
         let parts = activeLine.split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true).map(String.init)
-        guard parts.count == 6, isCronTime(parts[0]), isCronTime(parts[1]) else {
+        guard parts.count == 6,
+              isCronTime(parts[0]),
+              isCronTime(parts[1]),
+              parts[2] == "*",
+              parts[3] == "*",
+              isSupportedWeekday(parts[4]) else {
             return nil
         }
 
         let command = parts[5]
         let commandParts = parseCommand(command)
+        guard isSupportedCronCommandParts(commandParts) else {
+            return nil
+        }
+
         let scriptPath = commandParts.first ?? unquote(command)
         let parsedCommand = parseCronCommandParts(commandParts)
         var job = CronJob.blank()
@@ -684,6 +699,36 @@ struct CrontabManager {
         return (arguments, outLogPath, errorLogPath)
     }
 
+    private func isSupportedCronCommandParts(_ commandParts: [String]) -> Bool {
+        guard let executable = commandParts.first,
+              executable.hasPrefix("/") || executable.hasPrefix("~/") || executable.hasPrefix("./") || executable.hasPrefix("../") else {
+            return false
+        }
+
+        var index = 1
+        while index < commandParts.count {
+            let part = commandParts[index]
+
+            if part == ">>" || part == "2>>" {
+                guard index + 1 < commandParts.count else { return false }
+                index += 2
+                continue
+            }
+
+            if isShellControlToken(part) || part.hasPrefix(">") || part.hasPrefix("2>") || part.hasPrefix("&>") {
+                return false
+            }
+
+            index += 1
+        }
+
+        return true
+    }
+
+    private func isShellControlToken(_ value: String) -> Bool {
+        ["&&", "||", ";", "|", "<", "<<", "<<<", "&"].contains(value)
+    }
+
     private func parseWeekdays(_ value: String) -> [Weekday] {
         if value == "*" {
             return []
@@ -698,6 +743,12 @@ struct CrontabManager {
 
     private func isCronTime(_ value: String) -> Bool {
         value == "*" || Int(value) != nil || (value.hasPrefix("*/") && Int(value.dropFirst(2)) != nil)
+    }
+
+    private func isSupportedWeekday(_ value: String) -> Bool {
+        value == "*" || value.split(separator: ",").allSatisfy { weekday in
+            Int(weekday).map { 0...6 ~= $0 } == true
+        }
     }
 
     private func applyMinute(_ value: String, to job: inout CronJob) {

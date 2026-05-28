@@ -16,6 +16,10 @@ let package = Package(
                 .process("Resources")
             ]
         ),
+        .testTarget(
+            name: "CrontabEditorTests",
+            dependencies: ["CrontabEditor"]
+        ),
     ],
     swiftLanguageModes: [.v6]
 )
