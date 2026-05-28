@@ -1457,18 +1457,18 @@ struct ContentView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Crontab Editor")
-                    .font(.title2.bold())
+                    .font(.title3.bold())
                 Text(L10n.t("Crontab, LaunchAgent, and LaunchDaemon"))
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
             HStack {
                 Text(L10n.t("Jobs"))
-                    .font(.title2.bold())
+                    .font(.title3.bold())
                 Spacer()
                 Text("\(viewModel.visibleJobs.count)")
                     .font(.caption.weight(.semibold))
@@ -1483,7 +1483,7 @@ struct ContentView: View {
                     ForEach(viewModel.managedJobs) { job in
                         JobRow(job: job)
                             .tag(job.id)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
+                            .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
                     }
                 }
 
@@ -1492,7 +1492,7 @@ struct ContentView: View {
                         ForEach(viewModel.externalJobs) { job in
                             JobRow(job: job)
                                 .tag(job.id)
-                                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
+                                .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
                         }
                     }
                 }
@@ -1520,9 +1520,9 @@ struct ContentView: View {
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 18)
-        .frame(width: 300)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .frame(width: 340)
         .background(.ultraThinMaterial)
     }
 
@@ -2026,7 +2026,7 @@ struct JobRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(job.title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .lineLimit(1)
 
             HStack(spacing: 6) {
@@ -2041,12 +2041,23 @@ struct JobRow: View {
                     Text(L10n.t("external"))
                 }
             }
-            .font(.system(size: 13))
+            .font(.system(size: 12))
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        .padding(.vertical, 8)
-        .padding(.leading, 2)
+        .padding(.vertical, 6)
+        .help(jobTooltip)
+    }
+
+    private var jobTooltip: String {
+        [
+            job.title,
+            job.label,
+            job.backend.rawValue,
+            job.cronExpressions.first ?? job.cronExpression
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: "\n")
     }
 }
 
