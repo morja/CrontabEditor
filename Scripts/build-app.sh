@@ -6,6 +6,7 @@ CONFIGURATION="${1:-release}"
 APP_DIR="$ROOT_DIR/.build/CrontabEditor.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 cd "$ROOT_DIR"
 swift build -c "$CONFIGURATION"
@@ -13,8 +14,9 @@ swift build -c "$CONFIGURATION"
 BUILD_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/CrontabEditor" "$MACOS_DIR/CrontabEditor"
+cp "$ROOT_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -27,6 +29,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <string>local.crontab-editor</string>
     <key>CFBundleName</key>
     <string>Crontab Editor</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
