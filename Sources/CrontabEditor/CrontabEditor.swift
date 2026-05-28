@@ -594,13 +594,20 @@ struct LaunchAgentManager {
 
         for job in jobs {
             if !job.isEnabled {
-                try? unload(job)
-                try? FileManager.default.removeItem(at: job.launchAgentPath)
+                if FileManager.default.fileExists(atPath: job.launchAgentPath.path) {
+                    try? unload(job)
+                    try? FileManager.default.removeItem(at: job.launchAgentPath)
+                }
                 continue
             }
 
             let plist = plistDictionary(for: job)
-            try write(plist: plist, to: job.launchAgentPath)
+            let plistData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            if let existingData = try? Data(contentsOf: job.launchAgentPath), existingData == plistData {
+                continue
+            }
+
+            try write(data: plistData, to: job.launchAgentPath)
             try? unload(job)
             try load(job)
         }
@@ -781,8 +788,7 @@ struct LaunchAgentManager {
         job.selectedWeekdays = Array(Set(weekdays)).sorted { $0.cronValue < $1.cronValue }
     }
 
-    private func write(plist: [String: Any], to url: URL) throws {
-        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    private func write(data: Data, to url: URL) throws {
         try data.write(to: url, options: .atomic)
     }
 
@@ -870,13 +876,20 @@ struct LaunchDaemonManager {
 
         for job in jobs {
             if !job.isEnabled {
-                commands.append(bootoutCommand(for: job))
-                commands.append("rm -f \(shellQuoted(job.launchDaemonPath.path))")
+                if FileManager.default.fileExists(atPath: job.launchDaemonPath.path) {
+                    commands.append(bootoutCommand(for: job))
+                    commands.append("rm -f \(shellQuoted(job.launchDaemonPath.path))")
+                }
                 continue
             }
 
             let plist = plistDictionary(for: job)
-            let localURL = try writeTemporary(plist: plist, label: job.label)
+            let plistData = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            if let existingData = try? Data(contentsOf: job.launchDaemonPath), existingData == plistData {
+                continue
+            }
+
+            let localURL = try writeTemporary(data: plistData, label: job.label)
             temporaryFiles.append(localURL)
 
             commands.append(bootoutCommand(for: job))
@@ -958,8 +971,7 @@ struct LaunchDaemonManager {
         return plist
     }
 
-    private func writeTemporary(plist: [String: Any], label: String) throws -> URL {
-        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    private func writeTemporary(data: Data, label: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(label).plist")
         try data.write(to: url, options: .atomic)
         return url
