@@ -21,8 +21,11 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/CrontabEditor" "$MACOS_DIR/CrontabEditor"
 chmod 755 "$MACOS_DIR/CrontabEditor"
 cp "$ROOT_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
-if [ -d "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" ]; then
-    cp -R "$BUILD_DIR/CrontabEditor_CrontabEditor.bundle" "$RESOURCES_DIR/"
+find "$BUILD_DIR" -maxdepth 1 -name '*.bundle' -type d -exec cp -R {} "$RESOURCES_DIR/" \;
+
+if [ ! -d "$RESOURCES_DIR/CrontabEditor_CrontabEditor.bundle" ]; then
+    echo "Missing SwiftPM resource bundle in $RESOURCES_DIR" >&2
+    exit 1
 fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
