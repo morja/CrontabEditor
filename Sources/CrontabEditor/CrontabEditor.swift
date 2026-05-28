@@ -107,10 +107,10 @@ struct CronJob: Identifiable, Equatable {
             label: CronJob.label(for: name),
             backend: .crontab,
             scriptPath: "",
-            minuteMode: .specific,
+            minuteMode: .every,
             specificMinute: 0,
             minuteInterval: 15,
-            hourMode: .specific,
+            hourMode: .every,
             specificHour: 2,
             hourInterval: 1,
             weekday: .every,
@@ -1171,6 +1171,7 @@ struct ContentView: View {
                 ForEach(viewModel.jobs) { job in
                     JobRow(job: job)
                         .tag(job.id)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 10))
                 }
             }
             .listStyle(.sidebar)
@@ -1548,7 +1549,6 @@ struct ContentView: View {
                 viewModel.save()
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(!viewModel.canSave)
         }
     }
 
@@ -1629,6 +1629,9 @@ struct JobRow: View {
             HStack(spacing: 6) {
                 Text(job.backend.rawValue)
                 Text("·")
+                Text(job.cronExpressions.first ?? job.cronExpression)
+                    .monospacedDigit()
+                Text("·")
                 Text(job.isEnabled ? "aktiv" : "inaktiv")
             }
             .font(.system(size: 13))
@@ -1636,6 +1639,7 @@ struct JobRow: View {
             .lineLimit(1)
         }
         .padding(.vertical, 8)
+        .padding(.leading, 2)
     }
 }
 

@@ -24,6 +24,14 @@ codesign --verify --deep --strict .build/CrontabEditor.app
 
 Ad-hoc-Signing ist fuer lokale Tests und direkte Weitergabe brauchbar. Fuer eine oeffentliche Verteilung ohne Gatekeeper-Warnung brauchst du zusaetzlich eine Apple Developer ID Signatur und Notarisierung.
 
+Fuer die Weitergabe an einen anderen Mac die ZIP-Datei kopieren, nicht den `.app`-Ordner roh:
+
+```sh
+.build/CrontabEditor.zip
+```
+
+Das ZIP wird mit `ditto --keepParent` erzeugt, damit Bundle-Struktur und Execute-Rechte erhalten bleiben.
+
 ## Aktueller Umfang
 
 - Mehrere Cronjobs aus der User-Crontab lesen

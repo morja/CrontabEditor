@@ -4,6 +4,7 @@ set -eu
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="${1:-release}"
 APP_DIR="$ROOT_DIR/.build/CrontabEditor.app"
+ZIP_PATH="$ROOT_DIR/.build/CrontabEditor.zip"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
@@ -16,6 +17,7 @@ BUILD_DIR="$(swift build -c "$CONFIGURATION" --show-bin-path)"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BUILD_DIR/CrontabEditor" "$MACOS_DIR/CrontabEditor"
+chmod 755 "$MACOS_DIR/CrontabEditor"
 cp "$ROOT_DIR/Resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
@@ -48,4 +50,11 @@ PLIST
 codesign --force --deep --sign - "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
 
+rm -f "$ZIP_PATH"
+(
+    cd "$ROOT_DIR/.build"
+    ditto -c -k --keepParent CrontabEditor.app CrontabEditor.zip
+)
+
 echo "$APP_DIR"
+echo "$ZIP_PATH"
