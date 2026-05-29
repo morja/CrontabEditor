@@ -300,12 +300,14 @@ struct ContentView: View {
                     monthControls(index: index)
                 }
                 .padding(.top, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } label: {
-                Label(L10n.t("Month options"), systemImage: "calendar")
+                Label(L10n.t("Advanced schedule options"), systemImage: "calendar")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
 
             HStack(alignment: .top, spacing: 14) {
@@ -401,36 +403,43 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 260)
 
-                if viewModel.jobs[index].monthDayMode == .interval {
-                    Stepper(value: binding(index, \.monthDayInterval), in: 1...31) {
-                        Text(L10n.f("every %d days", viewModel.jobs[index].monthDayInterval))
-                            .monospacedDigit()
-                    }
-                    .frame(width: 180)
+                Stepper(value: binding(index, \.monthDayInterval), in: 1...31) {
+                    Text(L10n.f("every %d days", viewModel.jobs[index].monthDayInterval))
+                        .monospacedDigit()
                 }
+                .frame(width: 180)
+                .opacity(viewModel.jobs[index].monthDayMode == .interval ? 1 : 0)
+                .allowsHitTesting(viewModel.jobs[index].monthDayMode == .interval)
             }
+            .frame(width: 450, alignment: .leading)
 
-            if viewModel.jobs[index].monthDayMode == .specific {
-                LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4), count: 16), alignment: .leading, spacing: 4) {
-                    ForEach(1...31, id: \.self) { day in
-                        Toggle("\(day)", isOn: Binding(
-                            get: { viewModel.jobs[index].selectedMonthDays.contains(day) },
-                            set: { _ in viewModel.toggleMonthDayForSelectedJob(day) }
-                        ))
-                        .toggleStyle(.button)
-                        .controlSize(.mini)
-                        .frame(width: 34)
+            ZStack(alignment: .topLeading) {
+                if viewModel.jobs[index].monthDayMode == .specific {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4), count: 16), alignment: .leading, spacing: 4) {
+                            ForEach(1...31, id: \.self) { day in
+                                Toggle("\(day)", isOn: Binding(
+                                    get: { viewModel.jobs[index].selectedMonthDays.contains(day) },
+                                    set: { _ in viewModel.toggleMonthDayForSelectedJob(day) }
+                                ))
+                                .toggleStyle(.button)
+                                .controlSize(.mini)
+                                .frame(width: 34)
+                            }
+                        }
+                        Text(L10n.t("Leave empty for every day of the month."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                } else if viewModel.jobs[index].monthDayMode == .interval {
+                    Text(L10n.t("Cron uses day-of-month steps. LaunchD stores this as explicit month days."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text(L10n.t("Leave empty for every day of the month."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if viewModel.jobs[index].monthDayMode == .interval {
-                Text(L10n.t("Cron uses day-of-month steps. LaunchD stores this as explicit month days."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
+            .frame(width: 610, height: 62, alignment: .topLeading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func monthControls(index: Int) -> some View {
@@ -446,12 +455,14 @@ struct ContentView: View {
                     ))
                     .toggleStyle(.button)
                     .controlSize(.mini)
+                    .frame(width: 54)
                 }
             }
             Text(L10n.t("Leave empty for every month."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func monthShortTitle(_ month: Int) -> String {

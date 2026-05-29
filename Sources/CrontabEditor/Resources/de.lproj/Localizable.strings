@@ -129,6 +129,7 @@
 "Leave empty for every month." = "Leer lassen fuer jeden Monat.";
 "Month Days" = "Monatstage";
 "Month options" = "Monatsoptionen";
+"Advanced schedule options" = "Erweiterte Zeitplanoptionen";
 "Months" = "Monate";
 "One directory path per line." = "Ein Verzeichnispfad pro Zeile.";
 "One file or folder path per line." = "Ein Datei- oder Ordnerpfad pro Zeile.";
