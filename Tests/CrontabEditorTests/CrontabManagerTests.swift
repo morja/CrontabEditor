@@ -63,6 +63,22 @@ struct CrontabManagerTests {
         #expect(rendered == input)
     }
 
+    @Test func parsesAndRendersEveryNthMonthDay() throws {
+        let input = "0 2 */5 * * '/Users/mathis/bin/every-five-days.sh'\n"
+
+        let manager = CrontabManager()
+        let document = manager.parse(crontab: input)
+        let job = try #require(document.jobs.first)
+
+        #expect(document.jobs.count == 1)
+        #expect(job.monthDayMode == .interval)
+        #expect(job.monthDayInterval == 5)
+        #expect(job.monthDayExpression == "*/5")
+
+        let rendered = manager.render(jobs: document.jobs, preservedLines: document.preservedLines)
+        #expect(rendered == input)
+    }
+
     @Test func parsesAndRendersCronJobWithInterpreter() throws {
         let input = "* * * * * /bin/bash -l '/Users/mathis/bin/test script.sh' '--name=A B'\n"
 

@@ -23,6 +23,8 @@ struct CronJob: Identifiable, Equatable {
     var hourInterval: Int
     var scheduleEnabled: Bool
     var weekday: Weekday
+    var monthDayMode: TimeFieldMode
+    var monthDayInterval: Int
     var selectedWeekdays: [Weekday]
     var selectedMonthDays: [Int]
     var selectedMonths: [Int]
@@ -66,6 +68,8 @@ struct CronJob: Identifiable, Equatable {
             hourInterval: 1,
             scheduleEnabled: true,
             weekday: .every,
+            monthDayMode: .every,
+            monthDayInterval: 5,
             selectedWeekdays: [],
             selectedMonthDays: [],
             selectedMonths: [],
@@ -116,7 +120,14 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var monthDayExpression: String {
-        selectedMonthDays.isEmpty ? "*" : selectedMonthDays.sorted().map(String.init).joined(separator: ",")
+        switch monthDayMode {
+        case .every:
+            "*"
+        case .specific:
+            selectedMonthDays.isEmpty ? "*" : selectedMonthDays.sorted().map(String.init).joined(separator: ",")
+        case .interval:
+            "*/\(monthDayInterval)"
+        }
     }
 
     var monthExpression: String {
@@ -252,7 +263,14 @@ struct CronJob: Identifiable, Equatable {
         }
 
         let dayText = activeWeekdays.isEmpty ? L10n.t("Every Day") : activeWeekdays.map(\.title).joined(separator: ", ")
-        let monthDayText = selectedMonthDays.isEmpty ? "" : L10n.f(" on day(s) %@", selectedMonthDays.sorted().map(String.init).joined(separator: ", "))
+        let monthDayText = switch monthDayMode {
+        case .every:
+            ""
+        case .specific:
+            selectedMonthDays.isEmpty ? "" : L10n.f(" on day(s) %@", selectedMonthDays.sorted().map(String.init).joined(separator: ", "))
+        case .interval:
+            L10n.f(" every %d day(s) of the month", monthDayInterval)
+        }
         let monthText = selectedMonths.isEmpty ? "" : L10n.f(" in month(s) %@", selectedMonths.sorted().map(String.init).joined(separator: ", "))
         let timeText = fixedTimes.isEmpty ? "\(hourText), \(minuteText)" : fixedTimes.map(\.label).joined(separator: ", ")
 

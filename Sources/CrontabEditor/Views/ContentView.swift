@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var viewModel = CrontabViewModel()
     @State private var isBackendHelpVisible = false
     @State private var isAdvancedExpanded = false
+    @State private var isMonthScheduleExpanded = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -293,8 +294,19 @@ struct ContentView: View {
                 }
             }
 
-            monthDayControls(index: index)
-            monthControls(index: index)
+            DisclosureGroup(isExpanded: $isMonthScheduleExpanded) {
+                VStack(alignment: .leading, spacing: 10) {
+                    monthDayControls(index: index)
+                    monthControls(index: index)
+                }
+                .padding(.top, 6)
+            } label: {
+                Label(L10n.t("Month options"), systemImage: "calendar")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
 
             HStack(alignment: .top, spacing: 14) {
                 compactTimeControl(
@@ -378,20 +390,46 @@ struct ContentView: View {
             Text(L10n.t("Month Days"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4), count: 16), alignment: .leading, spacing: 4) {
-                ForEach(1...31, id: \.self) { day in
-                    Toggle("\(day)", isOn: Binding(
-                        get: { viewModel.jobs[index].selectedMonthDays.contains(day) },
-                        set: { _ in viewModel.toggleMonthDayForSelectedJob(day) }
-                    ))
-                    .toggleStyle(.button)
-                    .controlSize(.mini)
-                    .frame(width: 34)
+
+            HStack(spacing: 10) {
+                Picker(L10n.t("Month Days"), selection: binding(index, \.monthDayMode)) {
+                    ForEach(TimeFieldMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 260)
+
+                if viewModel.jobs[index].monthDayMode == .interval {
+                    Stepper(value: binding(index, \.monthDayInterval), in: 1...31) {
+                        Text(L10n.f("every %d days", viewModel.jobs[index].monthDayInterval))
+                            .monospacedDigit()
+                    }
+                    .frame(width: 180)
                 }
             }
-            Text(L10n.t("Leave empty for every day of the month."))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            if viewModel.jobs[index].monthDayMode == .specific {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4), count: 16), alignment: .leading, spacing: 4) {
+                    ForEach(1...31, id: \.self) { day in
+                        Toggle("\(day)", isOn: Binding(
+                            get: { viewModel.jobs[index].selectedMonthDays.contains(day) },
+                            set: { _ in viewModel.toggleMonthDayForSelectedJob(day) }
+                        ))
+                        .toggleStyle(.button)
+                        .controlSize(.mini)
+                        .frame(width: 34)
+                    }
+                }
+                Text(L10n.t("Leave empty for every day of the month."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if viewModel.jobs[index].monthDayMode == .interval {
+                Text(L10n.t("Cron uses day-of-month steps. LaunchD stores this as explicit month days."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

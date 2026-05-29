@@ -102,6 +102,9 @@
 "Cancel" = "Abbrechen";
 "You have unsaved jobs or changes. Save them before closing, discard them, or cancel closing." = "Es gibt ungespeicherte Jobs oder Aenderungen. Speichere sie vor dem Schliessen, verwirf sie oder brich das Schliessen ab.";
 "new" = "neu";
+" every %d day(s) of the month" = " alle %d Tag(e) im Monat";
+"Cron uses day-of-month steps. LaunchD stores this as explicit month days." = "Cron nutzt Schritte im Monatstags-Feld. LaunchD speichert das als konkrete Monatstage.";
+"every %d days" = "alle %d Tage";
 "every %d h" = "alle %d h";
 "every %d hours" = "alle %d Stunden";
 "every %d min" = "alle %d min";
@@ -125,6 +128,7 @@
 "Leave empty for every day of the month." = "Leer lassen fuer jeden Tag des Monats.";
 "Leave empty for every month." = "Leer lassen fuer jeden Monat.";
 "Month Days" = "Monatstage";
+"Month options" = "Monatsoptionen";
 "Months" = "Monate";
 "One directory path per line." = "Ein Verzeichnispfad pro Zeile.";
 "One file or folder path per line." = "Ein Datei- oder Ordnerpfad pro Zeile.";

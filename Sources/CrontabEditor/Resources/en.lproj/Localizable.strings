@@ -23,6 +23,7 @@
 "Leave empty for every day of the month." = "Leave empty for every day of the month.";
 "Leave empty for every month." = "Leave empty for every month.";
 "Month Days" = "Month Days";
+"Month options" = "Month options";
 "Months" = "Months";
 "One directory path per line." = "One directory path per line.";
 "One file or folder path per line." = "One file or folder path per line.";
@@ -52,3 +53,6 @@
 "Cancel" = "Cancel";
 "You have unsaved jobs or changes. Save them before closing, discard them, or cancel closing." = "You have unsaved jobs or changes. Save them before closing, discard them, or cancel closing.";
 "new" = "new";
+" every %d day(s) of the month" = " every %d day(s) of the month";
+"Cron uses day-of-month steps. LaunchD stores this as explicit month days." = "Cron uses day-of-month steps. LaunchD stores this as explicit month days.";
+"every %d days" = "every %d days";

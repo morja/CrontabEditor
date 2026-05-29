@@ -168,6 +168,7 @@ final class CrontabViewModel: ObservableObject {
         }
     }
 
+    @MainActor
     func chooseScriptForSelectedJob() {
         guard let selectedIndex else { return }
 

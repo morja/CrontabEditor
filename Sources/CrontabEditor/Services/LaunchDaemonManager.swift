@@ -183,7 +183,7 @@ struct LaunchDaemonManager {
     }
 
     private func startInterval(for job: CronJob) -> Int? {
-        guard job.selectedMonthDays.isEmpty, job.selectedMonths.isEmpty else { return nil }
+        guard job.monthDayMode == .every, job.selectedMonths.isEmpty else { return nil }
         if job.activeWeekdays.isEmpty, job.fixedTimes.isEmpty, job.hourMode == .every, job.minuteMode == .interval {
             return job.minuteInterval * 60
         }
@@ -228,7 +228,7 @@ struct LaunchDaemonManager {
 
     private func calendarDimensions(for job: CronJob) -> [(weekday: Weekday?, monthDay: Int?, month: Int?)] {
         let weekdays = job.activeWeekdays.isEmpty ? [Weekday?.none] : job.activeWeekdays.map(Optional.some)
-        let monthDays = job.selectedMonthDays.isEmpty ? [Int?.none] : job.selectedMonthDays.sorted().map(Optional.some)
+        let monthDays = monthDayValues(for: job)
         let months = job.selectedMonths.isEmpty ? [Int?.none] : job.selectedMonths.sorted().map(Optional.some)
 
         return weekdays.flatMap { weekday in
@@ -237,6 +237,18 @@ struct LaunchDaemonManager {
                     (weekday: weekday, monthDay: monthDay, month: month)
                 }
             }
+        }
+    }
+
+    private func monthDayValues(for job: CronJob) -> [Int?] {
+        switch job.monthDayMode {
+        case .every:
+            return [Int?.none]
+        case .specific:
+            return job.selectedMonthDays.isEmpty ? [Int?.none] : job.selectedMonthDays.sorted().map(Optional.some)
+        case .interval:
+            let interval = min(max(job.monthDayInterval, 1), 31)
+            return stride(from: 1, through: 31, by: interval).map(Optional.some)
         }
     }
 
@@ -312,6 +324,7 @@ struct LaunchDaemonManager {
             job.selectedWeekdays = [Weekday.fromCronValue(cronWeekday)]
         }
         if let day = calendar["Day"] {
+            job.monthDayMode = .specific
             job.selectedMonthDays = [min(max(day, 1), 31)]
         }
         if let month = calendar["Month"] {
@@ -339,6 +352,7 @@ struct LaunchDaemonManager {
         }
         job.selectedWeekdays = Array(Set(weekdays)).sorted { $0.cronValue < $1.cronValue }
         job.selectedMonthDays = Array(Set(calendars.compactMap { $0["Day"] }.map { min(max($0, 1), 31) })).sorted()
+        job.monthDayMode = job.selectedMonthDays.isEmpty ? .every : .specific
         job.selectedMonths = Array(Set(calendars.compactMap { $0["Month"] }.map { min(max($0, 1), 12) })).sorted()
     }
 

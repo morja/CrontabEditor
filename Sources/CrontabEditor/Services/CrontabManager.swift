@@ -143,7 +143,7 @@ struct CrontabManager {
         guard parts.count == 6,
               isCronTime(parts[0]),
               isCronTime(parts[1]),
-              isSupportedNumberList(parts[2], range: 1...31),
+              isSupportedNumberField(parts[2], range: 1...31),
               isSupportedNumberList(parts[3], range: 1...12),
               isSupportedWeekday(parts[4]) else {
             return nil
@@ -170,7 +170,7 @@ struct CrontabManager {
         job.originalCommand = nil
         applyMinute(parts[0], to: &job)
         applyHour(parts[1], to: &job)
-        job.selectedMonthDays = parseNumberList(parts[2])
+        applyMonthDay(parts[2], to: &job)
         job.selectedMonths = parseNumberList(parts[3])
         job.selectedWeekdays = parseWeekdays(parts[4])
         return job
@@ -294,6 +294,14 @@ struct CrontabManager {
         }
     }
 
+    private func isSupportedNumberField(_ value: String, range: ClosedRange<Int>) -> Bool {
+        if value.hasPrefix("*/"), let interval = Int(value.dropFirst(2)) {
+            return range ~= interval
+        }
+
+        return isSupportedNumberList(value, range: range)
+    }
+
     private func parseNumberList(_ value: String) -> [Int] {
         guard value != "*" else { return [] }
         return value.split(separator: ",").compactMap { Int($0) }.sorted()
@@ -320,6 +328,20 @@ struct CrontabManager {
         } else if let hour = Int(value) {
             job.hourMode = .specific
             job.specificHour = min(max(hour, 0), 23)
+        }
+    }
+
+    private func applyMonthDay(_ value: String, to job: inout CronJob) {
+        if value == "*" {
+            job.monthDayMode = .every
+            job.selectedMonthDays = []
+        } else if value.hasPrefix("*/"), let interval = Int(value.dropFirst(2)) {
+            job.monthDayMode = .interval
+            job.monthDayInterval = min(max(interval, 1), 31)
+            job.selectedMonthDays = []
+        } else {
+            job.monthDayMode = .specific
+            job.selectedMonthDays = parseNumberList(value)
         }
     }
 
