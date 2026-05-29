@@ -4,6 +4,13 @@ A minimal native macOS SwiftUI editor for user cron jobs, LaunchAgents, and Laun
 
 ![Crontab Editor screenshot](Assets/screenshot.jpg)
 
+## Support
+
+If Crontab Editor is useful for you, you can support the project here:
+
+- [Buy me a coffee](https://www.buymeacoffee.com/tearoom1)
+- [GitHub Sponsors](https://github.com/sponsors/tearoom1)
+
 ## Supported Systems
 
 Crontab Editor is a native macOS app.
@@ -158,6 +165,10 @@ LaunchAgent and LaunchDaemon plists are edited directly only when their label st
 LaunchAgents are user-scoped. LaunchDaemons are system-wide and can run without a login session, but require admin rights. The current implementation uses the macOS admin prompt through AppleScript. A signed privileged helper tool would be cleaner for a distributable product.
 
 The app is not notarized. Locally built app bundles are ad-hoc signed and may trigger Gatekeeper warnings on other Macs.
+
+## License
+
+Crontab Editor is released under the [MIT License](LICENSE).
 
 ## Practical Future Schedules
 
