@@ -114,9 +114,20 @@ The ZIP is created with `ditto --keepParent` so the bundle structure and executa
 - Use the custom macOS app icon in the bundle
 - Configure flexible schedules:
   - multiple weekdays, including workday and weekend presets
+  - selected days of the month, such as the 1st or 3rd
+  - selected months or month/date combinations
   - specific hour, every hour, or every N hours
   - specific minute, every minute, or every N minutes
   - multiple fixed times per day
+  - explicit launchd intervals every N seconds, minutes, or hours through `StartInterval`
+- Configure launchd-specific triggers and runtime options:
+  - `WatchPaths`
+  - `QueueDirectories`
+  - `StartOnMount`
+  - `KeepAlive`
+  - `WorkingDirectory`
+  - `EnvironmentVariables`
+  - `ThrottleInterval`
 - Use `RunAtLoad` to start immediately when loaded
 - Use `Run now` to start the selected job immediately
 - Use advanced settings for optional logging and labeled stdout/stderr log paths
@@ -138,7 +149,7 @@ Example:
 
 ## Notes
 
-The app can edit simple cron expressions: `*`, concrete numbers, and `*/N` for minute and hour. More complex cron syntax is kept as an unparseable line.
+The app can edit simple cron expressions: `*`, concrete numbers, comma-separated number lists for weekdays, month days, and months, and `*/N` for minute and hour. More complex cron syntax is kept as an unparseable line.
 
 Saving rewrites the user crontab. Unparseable lines, comments, and blank lines are preserved. Parseable external crontab lines are shown as jobs and may be rewritten in the app-generated form after saving.
 
@@ -150,11 +161,7 @@ The app is not notarized. Locally built app bundles are ad-hoc signed and may tr
 
 ## Practical Future Schedules
 
-- Start at login (`RunAtLoad`)
-- Every N seconds/minutes/hours (`StartInterval`)
-- Multiple fixed times per day
-- Multiple weekdays
-- Specific day of month
-- Specific month or date combinations
-- Start after network or path availability (`WatchPaths`, `QueueDirectories`)
+- Last day of the month
+- First/third/last weekday of the month
+- Holiday-aware exclusions
 - Create a one-shot job for the next scheduled time, then disable it

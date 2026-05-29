@@ -6,7 +6,6 @@ struct CrontabManagerTests {
         let input = """
         SHELL=/bin/zsh
         MAILTO=""
-        0 5 1 * * /usr/local/bin/monthly --mode full
         */15 8-18 * * 1-5 /usr/local/bin/workday
         30 2 * * * cd /tmp && /usr/local/bin/backup
         45 3 * * * FOO=bar /usr/local/bin/env-job
@@ -123,17 +122,19 @@ struct CrontabManagerTests {
         let manager = CrontabManager()
         let document = manager.parse(crontab: input)
 
-        #expect(document.jobs.count == 1)
-        #expect(document.jobs[0].isManaged)
-        #expect(document.jobs[0].name == "Backup Job")
+        #expect(document.jobs.count == 2)
+        #expect(!document.jobs[0].isManaged)
+        #expect(document.jobs[0].name == "monthly")
+        #expect(document.jobs[0].selectedMonthDays == [1])
+        #expect(document.jobs[1].isManaged)
+        #expect(document.jobs[1].name == "Backup Job")
         #expect(document.preservedLines == [
             "PATH=/opt/homebrew/bin:/usr/bin:/bin",
-            "0 5 1 * * /usr/local/bin/monthly --mode full",
             "@daily /usr/local/bin/special"
         ])
 
         let rendered = manager.render(jobs: document.jobs, preservedLines: document.preservedLines)
-        #expect(rendered.contains("0 5 1 * * /usr/local/bin/monthly --mode full"))
+        #expect(rendered.contains("0 5 1 * * '/usr/local/bin/monthly' '--mode' 'full'"))
         #expect(rendered.contains("@daily /usr/local/bin/special"))
         #expect(rendered.contains("# CrontabEditor JOB Backup Job"))
     }

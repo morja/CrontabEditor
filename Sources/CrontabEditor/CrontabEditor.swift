@@ -124,6 +124,23 @@ enum JobBackend: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ScheduleKind: String, CaseIterable, Identifiable {
+    case calendar = "Calendar"
+    case interval = "Interval"
+
+    var id: String { rawValue }
+    var title: String { L10n.t(rawValue) }
+}
+
+enum IntervalUnit: String, CaseIterable, Identifiable {
+    case seconds = "Seconds"
+    case minutes = "Minutes"
+    case hours = "Hours"
+
+    var id: String { rawValue }
+    var title: String { L10n.t(rawValue) }
+}
+
 enum ShellInterpreter: String, CaseIterable, Identifiable {
     case sh = "/bin/sh"
     case bash = "/bin/bash"
@@ -152,6 +169,9 @@ struct CronJob: Identifiable, Equatable {
     var useInterpreter: Bool
     var interpreterPath: String
     var interpreterArgumentsText: String
+    var scheduleKind: ScheduleKind
+    var intervalValue: Int
+    var intervalUnit: IntervalUnit
     var minuteMode: TimeFieldMode
     var specificMinute: Int
     var minuteInterval: Int
@@ -161,12 +181,23 @@ struct CronJob: Identifiable, Equatable {
     var scheduleEnabled: Bool
     var weekday: Weekday
     var selectedWeekdays: [Weekday]
+    var selectedMonthDays: [Int]
+    var selectedMonths: [Int]
     var fixedTimes: [DailyTime]
     var runAtLoad: Bool
+    var watchPathsText: String
+    var queueDirectoriesText: String
+    var startOnMount: Bool
+    var keepAlive: Bool
+    var workingDirectory: String
+    var environmentVariablesText: String
+    var throttleIntervalEnabled: Bool
+    var throttleInterval: Int
     var loggingEnabled: Bool
     var standardOutPath: String
     var standardErrorPath: String
     var isEnabled: Bool
+    var isInstalled: Bool
     var isManaged: Bool
     var originalCommand: String?
 
@@ -181,6 +212,9 @@ struct CronJob: Identifiable, Equatable {
             useInterpreter: false,
             interpreterPath: ShellInterpreter.zsh.rawValue,
             interpreterArgumentsText: "",
+            scheduleKind: .calendar,
+            intervalValue: 15,
+            intervalUnit: .minutes,
             minuteMode: .every,
             specificMinute: 0,
             minuteInterval: 15,
@@ -190,12 +224,23 @@ struct CronJob: Identifiable, Equatable {
             scheduleEnabled: true,
             weekday: .every,
             selectedWeekdays: [],
+            selectedMonthDays: [],
+            selectedMonths: [],
             fixedTimes: [],
             runAtLoad: false,
+            watchPathsText: "",
+            queueDirectoriesText: "",
+            startOnMount: false,
+            keepAlive: false,
+            workingDirectory: "",
+            environmentVariablesText: "",
+            throttleIntervalEnabled: false,
+            throttleInterval: 10,
             loggingEnabled: false,
             standardOutPath: "",
             standardErrorPath: "",
             isEnabled: true,
+            isInstalled: false,
             isManaged: true,
             originalCommand: nil
         )
@@ -219,7 +264,7 @@ struct CronJob: Identifiable, Equatable {
 
     var cronExpression: String {
         guard scheduleEnabled else { return L10n.t("No schedule") }
-        return "\(minuteExpression) \(hourExpression) * * \(weekdayExpression)"
+        return "\(minuteExpression) \(hourExpression) \(monthDayExpression) \(monthExpression) \(weekdayExpression)"
     }
 
     var weekdayExpression: String {
@@ -227,17 +272,35 @@ struct CronJob: Identifiable, Equatable {
         return values.isEmpty ? "*" : values.joined(separator: ",")
     }
 
+    var monthDayExpression: String {
+        selectedMonthDays.isEmpty ? "*" : selectedMonthDays.sorted().map(String.init).joined(separator: ",")
+    }
+
+    var monthExpression: String {
+        selectedMonths.isEmpty ? "*" : selectedMonths.sorted().map(String.init).joined(separator: ",")
+    }
+
     var activeWeekdays: [Weekday] {
         selectedWeekdays.filter { $0 != .every }
     }
 
+    var startIntervalSeconds: Int {
+        let value = max(intervalValue, 1)
+        switch intervalUnit {
+        case .seconds: return value
+        case .minutes: return value * 60
+        case .hours: return value * 60 * 60
+        }
+    }
+
     var cronExpressions: [String] {
         guard scheduleEnabled else { return [] }
+        guard scheduleKind == .calendar else { return [] }
         if fixedTimes.isEmpty {
             return [cronExpression]
         }
 
-        return fixedTimes.map { "\($0.minute) \($0.hour) * * \(weekdayExpression)" }
+        return fixedTimes.map { "\($0.minute) \($0.hour) \(monthDayExpression) \(monthExpression) \(weekdayExpression)" }
     }
 
     var command: String {
@@ -314,7 +377,12 @@ struct CronJob: Identifiable, Equatable {
     }
 
     var subtitle: String {
-        "\(backend.rawValue) · \(cronExpressions.first ?? cronExpression) · \(isEnabled ? L10n.t("active") : L10n.t("inactive"))"
+        "\(backend.rawValue) · \(cronExpressions.first ?? cronExpression) · \(statusTitle)"
+    }
+
+    var statusTitle: String {
+        guard isInstalled else { return L10n.t("new") }
+        return isEnabled ? L10n.t("active") : L10n.t("inactive")
     }
 
     var scheduleDescription: String {
@@ -322,6 +390,10 @@ struct CronJob: Identifiable, Equatable {
             return runAtLoad
                 ? L10n.t("No schedule. The job starts when loaded and via Run now.")
                 : L10n.t("No schedule. The job starts only via Run now.")
+        }
+
+        if scheduleKind == .interval {
+            return L10n.f("Every %d %@.", intervalValue, intervalUnit.title.lowercased())
         }
 
         let minuteText = switch minuteMode {
@@ -337,9 +409,11 @@ struct CronJob: Identifiable, Equatable {
         }
 
         let dayText = activeWeekdays.isEmpty ? L10n.t("Every Day") : activeWeekdays.map(\.title).joined(separator: ", ")
+        let monthDayText = selectedMonthDays.isEmpty ? "" : L10n.f(" on day(s) %@", selectedMonthDays.sorted().map(String.init).joined(separator: ", "))
+        let monthText = selectedMonths.isEmpty ? "" : L10n.f(" in month(s) %@", selectedMonths.sorted().map(String.init).joined(separator: ", "))
         let timeText = fixedTimes.isEmpty ? "\(hourText), \(minuteText)" : fixedTimes.map(\.label).joined(separator: ", ")
 
-        return "\(dayText), \(timeText)."
+        return "\(dayText)\(monthDayText)\(monthText), \(timeText)."
     }
 
     private func shellEscaped(_ path: String) -> String {
@@ -441,6 +515,24 @@ fileprivate func isKnownInterpreter(_ value: String) -> Bool {
     return ["sh", "bash", "zsh", "fish"].contains(URL(fileURLWithPath: value).lastPathComponent)
 }
 
+fileprivate func lines(from text: String) -> [String] {
+    text
+        .split(whereSeparator: \.isNewline)
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+}
+
+fileprivate func keyValueLines(from text: String) -> [String: String] {
+    Dictionary(uniqueKeysWithValues: lines(from: text).compactMap { line in
+        let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        return (
+            parts[0].trimmingCharacters(in: .whitespacesAndNewlines),
+            parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    })
+}
+
 @MainActor
 final class CrontabViewModel: ObservableObject {
     @Published var jobs: [CronJob] = []
@@ -448,6 +540,7 @@ final class CrontabViewModel: ObservableObject {
     @Published var statusMessage = L10n.t("Not loaded yet.")
     @Published var invalidJobIDs: Set<CronJob.ID> = []
     @Published var showExternalJobs = false
+    @Published var hasUnsavedChanges = false
 
     private let manager = CrontabManager()
     private let launchAgentManager = LaunchAgentManager()
@@ -506,6 +599,7 @@ final class CrontabViewModel: ObservableObject {
             } else {
                 selectedJobID = defaultSelectedJobID
             }
+            hasUnsavedChanges = false
             statusMessage = jobs.isEmpty ? L10n.t("No cron jobs found.") : L10n.f("%d cron job(s) loaded.", jobs.count)
         } catch {
             statusMessage = L10n.f("Could not read crontab: %@", error.localizedDescription)
@@ -528,6 +622,7 @@ final class CrontabViewModel: ObservableObject {
         let job = CronJob.blank()
         jobs.append(job)
         selectedJobID = job.id
+        hasUnsavedChanges = true
         statusMessage = L10n.t("New job created.")
     }
 
@@ -539,10 +634,14 @@ final class CrontabViewModel: ObservableObject {
         }
         jobs.remove(at: selectedIndex)
         selectedJobID = jobs.indices.contains(selectedIndex) ? jobs[selectedIndex].id : jobs.last?.id
+        hasUnsavedChanges = true
         statusMessage = L10n.t("Job removed. Save writes the change to the crontab.")
     }
 
-    func save() {
+    @discardableResult
+    func save() -> Bool {
+        let previousSelectedID = selectedJobID
+
         guard canSave else {
             invalidJobIDs = Set(jobs
                 .filter(isEditable)
@@ -553,7 +652,7 @@ final class CrontabViewModel: ObservableObject {
                 .map(\.id))
             selectedJobID = invalidJobIDs.first ?? selectedJobID
             statusMessage = L10n.t("All jobs need a script path and selected interpreter path.")
-            return
+            return false
         }
         invalidJobIDs.removeAll()
 
@@ -561,10 +660,26 @@ final class CrontabViewModel: ObservableObject {
             let backupURL = try manager.save(jobs: jobs.filter { $0.backend == .crontab }, preservedLines: preservedLines)
             try launchAgentManager.save(jobs: jobs.filter { $0.backend == .launchAgent && $0.isManaged })
             try launchDaemonManager.save(jobs: jobs.filter { $0.backend == .launchDaemon && $0.isManaged })
+            markEditableJobsInstalled()
+            restoreSelection(previousSelectedID)
+            hasUnsavedChanges = false
             statusMessage = L10n.f("Jobs saved. Backup: %@", backupURL.lastPathComponent)
+            return true
         } catch {
             statusMessage = L10n.f("Save failed: %@", error.localizedDescription)
+            return false
         }
+    }
+
+    private func markEditableJobsInstalled() {
+        for index in jobs.indices where isEditable(jobs[index]) {
+            jobs[index].isInstalled = true
+        }
+    }
+
+    private func restoreSelection(_ jobID: CronJob.ID?) {
+        guard let jobID, visibleJobs.contains(where: { $0.id == jobID }) else { return }
+        selectedJobID = jobID
     }
 
     func runSelectedNow() {
@@ -598,18 +713,21 @@ final class CrontabViewModel: ObservableObject {
             jobs[selectedIndex].scriptPath = url.path
             jobs[selectedIndex].originalCommand = nil
             invalidJobIDs.remove(jobs[selectedIndex].id)
+            hasUnsavedChanges = true
         }
     }
 
     func updateSelectedJob(_ update: (inout CronJob) -> Void) {
         guard let selectedIndex else { return }
         update(&jobs[selectedIndex])
+        hasUnsavedChanges = true
     }
 
     func updateSelectedJobName(_ name: String) {
         guard let selectedIndex else { return }
         jobs[selectedIndex].name = name
         jobs[selectedIndex].label = CronJob.label(for: name)
+        hasUnsavedChanges = true
     }
 
     func setBackendForSelectedJob(_ backend: JobBackend) {
@@ -617,12 +735,35 @@ final class CrontabViewModel: ObservableObject {
         jobs[selectedIndex].backend = backend
         if backend == .crontab {
             jobs[selectedIndex].runAtLoad = false
+            jobs[selectedIndex].scheduleKind = .calendar
         }
+        hasUnsavedChanges = true
     }
 
     func setWeekdaysForSelectedJob(_ weekdays: [Weekday]) {
         guard let selectedIndex else { return }
         jobs[selectedIndex].selectedWeekdays = weekdays
+        hasUnsavedChanges = true
+    }
+
+    func toggleMonthDayForSelectedJob(_ day: Int) {
+        guard let selectedIndex else { return }
+        if jobs[selectedIndex].selectedMonthDays.contains(day) {
+            jobs[selectedIndex].selectedMonthDays.removeAll { $0 == day }
+        } else {
+            jobs[selectedIndex].selectedMonthDays.append(day)
+        }
+        hasUnsavedChanges = true
+    }
+
+    func toggleMonthForSelectedJob(_ month: Int) {
+        guard let selectedIndex else { return }
+        if jobs[selectedIndex].selectedMonths.contains(month) {
+            jobs[selectedIndex].selectedMonths.removeAll { $0 == month }
+        } else {
+            jobs[selectedIndex].selectedMonths.append(month)
+        }
+        hasUnsavedChanges = true
     }
 
     func toggleWeekdayForSelectedJob(_ weekday: Weekday) {
@@ -632,16 +773,23 @@ final class CrontabViewModel: ObservableObject {
         } else {
             jobs[selectedIndex].selectedWeekdays.append(weekday)
         }
+        hasUnsavedChanges = true
     }
 
     func addFixedTimeForSelectedJob() {
         guard let selectedIndex else { return }
         jobs[selectedIndex].fixedTimes.append(DailyTime(hour: jobs[selectedIndex].specificHour, minute: jobs[selectedIndex].specificMinute))
+        hasUnsavedChanges = true
     }
 
     func removeFixedTimeForSelectedJob(_ time: DailyTime) {
         guard let selectedIndex else { return }
         jobs[selectedIndex].fixedTimes.removeAll { $0.id == time.id }
+        hasUnsavedChanges = true
+    }
+
+    func markDirty() {
+        hasUnsavedChanges = true
     }
 }
 
@@ -684,6 +832,7 @@ struct CrontabManager {
                 if let managedName = nextManagedName {
                     var managedJob = job
                     managedJob.isManaged = true
+                    managedJob.isInstalled = true
                     managedJob.name = managedName
                     managedJob.label = CronJob.label(for: managedName)
                     jobs.append(managedJob)
@@ -691,9 +840,12 @@ struct CrontabManager {
                 } else if insideOldManagedBlock {
                     var managedJob = job
                     managedJob.isManaged = true
+                    managedJob.isInstalled = true
                     jobs.append(managedJob)
                 } else {
-                    jobs.append(job)
+                    var externalJob = job
+                    externalJob.isInstalled = true
+                    jobs.append(externalJob)
                 }
             } else if !insideOldManagedBlock {
                 preservedLines.append(line)
@@ -782,8 +934,8 @@ struct CrontabManager {
         guard parts.count == 6,
               isCronTime(parts[0]),
               isCronTime(parts[1]),
-              parts[2] == "*",
-              parts[3] == "*",
+              isSupportedNumberList(parts[2], range: 1...31),
+              isSupportedNumberList(parts[3], range: 1...12),
               isSupportedWeekday(parts[4]) else {
             return nil
         }
@@ -798,6 +950,7 @@ struct CrontabManager {
         var job = CronJob.blank()
         job.backend = .crontab
         job.isManaged = false
+        job.isInstalled = true
         applyProgramArguments(parsedCommand.arguments, to: &job)
         job.loggingEnabled = parsedCommand.outLogPath != nil || parsedCommand.errorLogPath != nil
         job.standardOutPath = parsedCommand.outLogPath ?? ""
@@ -808,6 +961,8 @@ struct CrontabManager {
         job.originalCommand = nil
         applyMinute(parts[0], to: &job)
         applyHour(parts[1], to: &job)
+        job.selectedMonthDays = parseNumberList(parts[2])
+        job.selectedMonths = parseNumberList(parts[3])
         job.selectedWeekdays = parseWeekdays(parts[4])
         return job
     }
@@ -922,6 +1077,17 @@ struct CrontabManager {
         value == "*" || value.split(separator: ",").allSatisfy { weekday in
             Int(weekday).map { 0...6 ~= $0 } == true
         }
+    }
+
+    private func isSupportedNumberList(_ value: String, range: ClosedRange<Int>) -> Bool {
+        value == "*" || value.split(separator: ",").allSatisfy { part in
+            Int(part).map { range ~= $0 } == true
+        }
+    }
+
+    private func parseNumberList(_ value: String) -> [Int] {
+        guard value != "*" else { return [] }
+        return value.split(separator: ",").compactMap { Int($0) }.sorted()
     }
 
     private func applyMinute(_ value: String, to job: inout CronJob) {
@@ -1130,12 +1296,25 @@ struct LaunchAgentManager {
         job.name = job.isManaged ? displayName(from: label) : label
         applyProgramArguments(arguments, to: &job)
         job.isEnabled = true
+        job.isInstalled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
         job.standardOutPath = (plist["StandardOutPath"] as? String) ?? ""
         job.standardErrorPath = (plist["StandardErrorPath"] as? String) ?? ""
         job.loggingEnabled = !job.standardOutPath.isEmpty || !job.standardErrorPath.isEmpty
         job.scheduleEnabled = plist["StartInterval"] != nil || plist["StartCalendarInterval"] != nil
+        job.watchPathsText = ((plist["WatchPaths"] as? [String]) ?? []).joined(separator: "\n")
+        job.queueDirectoriesText = ((plist["QueueDirectories"] as? [String]) ?? []).joined(separator: "\n")
+        job.startOnMount = (plist["StartOnMount"] as? Bool) ?? false
+        job.keepAlive = (plist["KeepAlive"] as? Bool) ?? false
+        job.workingDirectory = (plist["WorkingDirectory"] as? String) ?? ""
+        if let environment = plist["EnvironmentVariables"] as? [String: String] {
+            job.environmentVariablesText = environment.keys.sorted().map { "\($0)=\(environment[$0] ?? "")" }.joined(separator: "\n")
+        }
+        if let throttleInterval = plist["ThrottleInterval"] as? Int {
+            job.throttleIntervalEnabled = true
+            job.throttleInterval = max(throttleInterval, 1)
+        }
 
         if let interval = plist["StartInterval"] as? Int {
             applyStartInterval(interval, to: &job)
@@ -1160,9 +1339,34 @@ struct LaunchAgentManager {
             plist["StandardErrorPath"] = job.standardErrorPath.isEmpty ? logPath(for: job, suffix: "err") : job.standardErrorPath
         }
 
+        if !job.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            plist["WorkingDirectory"] = job.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let environment = keyValueLines(from: job.environmentVariablesText)
+        if !environment.isEmpty {
+            plist["EnvironmentVariables"] = environment
+        }
+        let watchPaths = lines(from: job.watchPathsText)
+        if !watchPaths.isEmpty {
+            plist["WatchPaths"] = watchPaths
+        }
+        let queueDirectories = lines(from: job.queueDirectoriesText)
+        if !queueDirectories.isEmpty {
+            plist["QueueDirectories"] = queueDirectories
+        }
+        if job.startOnMount {
+            plist["StartOnMount"] = true
+        }
+        if job.keepAlive {
+            plist["KeepAlive"] = true
+        }
+        if job.throttleIntervalEnabled {
+            plist["ThrottleInterval"] = max(job.throttleInterval, 1)
+        }
+
         if job.scheduleEnabled {
-            if let interval = startInterval(for: job) {
-                plist["StartInterval"] = interval
+            if job.scheduleKind == .interval {
+                plist["StartInterval"] = job.startIntervalSeconds
             } else {
                 plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
             }
@@ -1172,6 +1376,7 @@ struct LaunchAgentManager {
     }
 
     private func startInterval(for job: CronJob) -> Int? {
+        guard job.selectedMonthDays.isEmpty, job.selectedMonths.isEmpty else { return nil }
         if job.activeWeekdays.isEmpty, job.fixedTimes.isEmpty, job.hourMode == .every, job.minuteMode == .interval {
             return job.minuteInterval * 60
         }
@@ -1185,18 +1390,26 @@ struct LaunchAgentManager {
     }
 
     private func startCalendarIntervals(for job: CronJob) -> Any {
-        let weekdays = job.activeWeekdays
         let times = job.fixedTimes
 
         if times.isEmpty {
-            return startCalendarInterval(for: job, weekday: weekdays.first)
+            let intervals = calendarDimensions(for: job).map { dimension in
+                startCalendarInterval(for: job, weekday: dimension.weekday, monthDay: dimension.monthDay, month: dimension.month)
+            }
+            return intervals.count == 1 ? intervals[0] : intervals
         }
 
-        let intervals = (weekdays.isEmpty ? [nil] : weekdays.map(Optional.some)).flatMap { weekday in
+        let intervals = calendarDimensions(for: job).flatMap { dimension in
             times.map { time in
                 var calendar: [String: Int] = ["Hour": time.hour, "Minute": time.minute]
-                if let weekday, let value = Int(weekday.cronValue) {
+                if let weekday = dimension.weekday, let value = Int(weekday.cronValue) {
                     calendar["Weekday"] = value == 0 ? 7 : value
+                }
+                if let monthDay = dimension.monthDay {
+                    calendar["Day"] = monthDay
+                }
+                if let month = dimension.month {
+                    calendar["Month"] = month
                 }
                 return calendar
             }
@@ -1205,7 +1418,21 @@ struct LaunchAgentManager {
         return intervals.count == 1 ? intervals[0] : intervals
     }
 
-    private func startCalendarInterval(for job: CronJob, weekday selectedWeekday: Weekday?) -> [String: Int] {
+    private func calendarDimensions(for job: CronJob) -> [(weekday: Weekday?, monthDay: Int?, month: Int?)] {
+        let weekdays = job.activeWeekdays.isEmpty ? [Weekday?.none] : job.activeWeekdays.map(Optional.some)
+        let monthDays = job.selectedMonthDays.isEmpty ? [Int?.none] : job.selectedMonthDays.sorted().map(Optional.some)
+        let months = job.selectedMonths.isEmpty ? [Int?.none] : job.selectedMonths.sorted().map(Optional.some)
+
+        return weekdays.flatMap { weekday in
+            monthDays.flatMap { monthDay in
+                months.map { month in
+                    (weekday: weekday, monthDay: monthDay, month: month)
+                }
+            }
+        }
+    }
+
+    private func startCalendarInterval(for job: CronJob, weekday selectedWeekday: Weekday?, monthDay: Int?, month: Int?) -> [String: Int] {
         var calendar: [String: Int] = [:]
 
         if job.minuteMode == .specific {
@@ -1217,6 +1444,12 @@ struct LaunchAgentManager {
         if let selectedWeekday, let weekday = Int(selectedWeekday.cronValue) {
             calendar["Weekday"] = weekday == 0 ? 7 : weekday
         }
+        if let monthDay {
+            calendar["Day"] = monthDay
+        }
+        if let month {
+            calendar["Month"] = month
+        }
 
         if calendar.isEmpty {
             calendar["Minute"] = 0
@@ -1226,6 +1459,18 @@ struct LaunchAgentManager {
     }
 
     private func applyStartInterval(_ interval: Int, to job: inout CronJob) {
+        job.scheduleKind = .interval
+        if interval % 3600 == 0 {
+            job.intervalUnit = .hours
+            job.intervalValue = max(interval / 3600, 1)
+        } else if interval % 60 == 0 {
+            job.intervalUnit = .minutes
+            job.intervalValue = max(interval / 60, 1)
+        } else {
+            job.intervalUnit = .seconds
+            job.intervalValue = max(interval, 1)
+        }
+
         if interval == 60 {
             job.minuteMode = .every
             job.hourMode = .every
@@ -1242,6 +1487,7 @@ struct LaunchAgentManager {
     }
 
     private func applyCalendar(_ calendar: [String: Int], to job: inout CronJob) {
+        job.scheduleKind = .calendar
         if let minute = calendar["Minute"] {
             job.minuteMode = .specific
             job.specificMinute = min(max(minute, 0), 59)
@@ -1260,9 +1506,16 @@ struct LaunchAgentManager {
             let cronWeekday = launchdWeekday == 7 ? "0" : "\(launchdWeekday)"
             job.selectedWeekdays = [Weekday.fromCronValue(cronWeekday)]
         }
+        if let day = calendar["Day"] {
+            job.selectedMonthDays = [min(max(day, 1), 31)]
+        }
+        if let month = calendar["Month"] {
+            job.selectedMonths = [min(max(month, 1), 12)]
+        }
     }
 
     private func applyCalendars(_ calendars: [[String: Int]], to job: inout CronJob) {
+        job.scheduleKind = .calendar
         let times = calendars.compactMap { calendar -> DailyTime? in
             guard let hour = calendar["Hour"], let minute = calendar["Minute"] else { return nil }
             return DailyTime(hour: min(max(hour, 0), 23), minute: min(max(minute, 0), 59))
@@ -1280,6 +1533,8 @@ struct LaunchAgentManager {
             return Weekday.fromCronValue(launchdWeekday == 7 ? "0" : "\(launchdWeekday)")
         }
         job.selectedWeekdays = Array(Set(weekdays)).sorted { $0.cronValue < $1.cronValue }
+        job.selectedMonthDays = Array(Set(calendars.compactMap { $0["Day"] }.map { min(max($0, 1), 31) })).sorted()
+        job.selectedMonths = Array(Set(calendars.compactMap { $0["Month"] }.map { min(max($0, 1), 12) })).sorted()
     }
 
     private func write(data: Data, to url: URL) throws {
@@ -1432,12 +1687,25 @@ struct LaunchDaemonManager {
         job.name = job.isManaged ? displayName(from: label) : label
         applyProgramArguments(arguments, to: &job)
         job.isEnabled = true
+        job.isInstalled = true
 
         job.runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
         job.standardOutPath = (plist["StandardOutPath"] as? String) ?? ""
         job.standardErrorPath = (plist["StandardErrorPath"] as? String) ?? ""
         job.loggingEnabled = !job.standardOutPath.isEmpty || !job.standardErrorPath.isEmpty
         job.scheduleEnabled = plist["StartInterval"] != nil || plist["StartCalendarInterval"] != nil
+        job.watchPathsText = ((plist["WatchPaths"] as? [String]) ?? []).joined(separator: "\n")
+        job.queueDirectoriesText = ((plist["QueueDirectories"] as? [String]) ?? []).joined(separator: "\n")
+        job.startOnMount = (plist["StartOnMount"] as? Bool) ?? false
+        job.keepAlive = (plist["KeepAlive"] as? Bool) ?? false
+        job.workingDirectory = (plist["WorkingDirectory"] as? String) ?? ""
+        if let environment = plist["EnvironmentVariables"] as? [String: String] {
+            job.environmentVariablesText = environment.keys.sorted().map { "\($0)=\(environment[$0] ?? "")" }.joined(separator: "\n")
+        }
+        if let throttleInterval = plist["ThrottleInterval"] as? Int {
+            job.throttleIntervalEnabled = true
+            job.throttleInterval = max(throttleInterval, 1)
+        }
 
         if let interval = plist["StartInterval"] as? Int {
             applyStartInterval(interval, to: &job)
@@ -1462,9 +1730,34 @@ struct LaunchDaemonManager {
             plist["StandardErrorPath"] = job.standardErrorPath.isEmpty ? "/var/log/\(job.label).err.log" : job.standardErrorPath
         }
 
+        if !job.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            plist["WorkingDirectory"] = job.workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let environment = keyValueLines(from: job.environmentVariablesText)
+        if !environment.isEmpty {
+            plist["EnvironmentVariables"] = environment
+        }
+        let watchPaths = lines(from: job.watchPathsText)
+        if !watchPaths.isEmpty {
+            plist["WatchPaths"] = watchPaths
+        }
+        let queueDirectories = lines(from: job.queueDirectoriesText)
+        if !queueDirectories.isEmpty {
+            plist["QueueDirectories"] = queueDirectories
+        }
+        if job.startOnMount {
+            plist["StartOnMount"] = true
+        }
+        if job.keepAlive {
+            plist["KeepAlive"] = true
+        }
+        if job.throttleIntervalEnabled {
+            plist["ThrottleInterval"] = max(job.throttleInterval, 1)
+        }
+
         if job.scheduleEnabled {
-            if let interval = startInterval(for: job) {
-                plist["StartInterval"] = interval
+            if job.scheduleKind == .interval {
+                plist["StartInterval"] = job.startIntervalSeconds
             } else {
                 plist["StartCalendarInterval"] = startCalendarIntervals(for: job)
             }
@@ -1484,6 +1777,7 @@ struct LaunchDaemonManager {
     }
 
     private func startInterval(for job: CronJob) -> Int? {
+        guard job.selectedMonthDays.isEmpty, job.selectedMonths.isEmpty else { return nil }
         if job.activeWeekdays.isEmpty, job.fixedTimes.isEmpty, job.hourMode == .every, job.minuteMode == .interval {
             return job.minuteInterval * 60
         }
@@ -1502,16 +1796,22 @@ struct LaunchDaemonManager {
 
         if times.isEmpty {
             let intervals = weekdays.isEmpty
-                ? [startCalendarInterval(for: job, weekday: nil)]
-                : weekdays.map { startCalendarInterval(for: job, weekday: $0) }
+                ? calendarDimensions(for: job).map { startCalendarInterval(for: job, weekday: $0.weekday, monthDay: $0.monthDay, month: $0.month) }
+                : calendarDimensions(for: job).map { startCalendarInterval(for: job, weekday: $0.weekday, monthDay: $0.monthDay, month: $0.month) }
             return intervals.count == 1 ? intervals[0] : intervals
         }
 
-        let intervals = (weekdays.isEmpty ? [nil] : weekdays.map(Optional.some)).flatMap { weekday in
+        let intervals = calendarDimensions(for: job).flatMap { dimension in
             times.map { time in
                 var calendar: [String: Int] = ["Hour": time.hour, "Minute": time.minute]
-                if let weekday, let value = Int(weekday.cronValue) {
+                if let weekday = dimension.weekday, let value = Int(weekday.cronValue) {
                     calendar["Weekday"] = value == 0 ? 7 : value
+                }
+                if let monthDay = dimension.monthDay {
+                    calendar["Day"] = monthDay
+                }
+                if let month = dimension.month {
+                    calendar["Month"] = month
                 }
                 return calendar
             }
@@ -1520,7 +1820,21 @@ struct LaunchDaemonManager {
         return intervals.count == 1 ? intervals[0] : intervals
     }
 
-    private func startCalendarInterval(for job: CronJob, weekday selectedWeekday: Weekday?) -> [String: Int] {
+    private func calendarDimensions(for job: CronJob) -> [(weekday: Weekday?, monthDay: Int?, month: Int?)] {
+        let weekdays = job.activeWeekdays.isEmpty ? [Weekday?.none] : job.activeWeekdays.map(Optional.some)
+        let monthDays = job.selectedMonthDays.isEmpty ? [Int?.none] : job.selectedMonthDays.sorted().map(Optional.some)
+        let months = job.selectedMonths.isEmpty ? [Int?.none] : job.selectedMonths.sorted().map(Optional.some)
+
+        return weekdays.flatMap { weekday in
+            monthDays.flatMap { monthDay in
+                months.map { month in
+                    (weekday: weekday, monthDay: monthDay, month: month)
+                }
+            }
+        }
+    }
+
+    private func startCalendarInterval(for job: CronJob, weekday selectedWeekday: Weekday?, monthDay: Int?, month: Int?) -> [String: Int] {
         var calendar: [String: Int] = [:]
         if job.minuteMode == .specific {
             calendar["Minute"] = job.specificMinute
@@ -1531,6 +1845,12 @@ struct LaunchDaemonManager {
         if let selectedWeekday, let weekday = Int(selectedWeekday.cronValue) {
             calendar["Weekday"] = weekday == 0 ? 7 : weekday
         }
+        if let monthDay {
+            calendar["Day"] = monthDay
+        }
+        if let month {
+            calendar["Month"] = month
+        }
         if calendar.isEmpty {
             calendar["Minute"] = 0
         }
@@ -1538,6 +1858,18 @@ struct LaunchDaemonManager {
     }
 
     private func applyStartInterval(_ interval: Int, to job: inout CronJob) {
+        job.scheduleKind = .interval
+        if interval % 3600 == 0 {
+            job.intervalUnit = .hours
+            job.intervalValue = max(interval / 3600, 1)
+        } else if interval % 60 == 0 {
+            job.intervalUnit = .minutes
+            job.intervalValue = max(interval / 60, 1)
+        } else {
+            job.intervalUnit = .seconds
+            job.intervalValue = max(interval, 1)
+        }
+
         if interval == 60 {
             job.minuteMode = .every
             job.hourMode = .every
@@ -1554,6 +1886,7 @@ struct LaunchDaemonManager {
     }
 
     private func applyCalendar(_ calendar: [String: Int], to job: inout CronJob) {
+        job.scheduleKind = .calendar
         if let minute = calendar["Minute"] {
             job.minuteMode = .specific
             job.specificMinute = min(max(minute, 0), 59)
@@ -1572,9 +1905,16 @@ struct LaunchDaemonManager {
             let cronWeekday = launchdWeekday == 7 ? "0" : "\(launchdWeekday)"
             job.selectedWeekdays = [Weekday.fromCronValue(cronWeekday)]
         }
+        if let day = calendar["Day"] {
+            job.selectedMonthDays = [min(max(day, 1), 31)]
+        }
+        if let month = calendar["Month"] {
+            job.selectedMonths = [min(max(month, 1), 12)]
+        }
     }
 
     private func applyCalendars(_ calendars: [[String: Int]], to job: inout CronJob) {
+        job.scheduleKind = .calendar
         let times = calendars.compactMap { calendar -> DailyTime? in
             guard let hour = calendar["Hour"], let minute = calendar["Minute"] else { return nil }
             return DailyTime(hour: min(max(hour, 0), 23), minute: min(max(minute, 0), 59))
@@ -1592,6 +1932,8 @@ struct LaunchDaemonManager {
             return Weekday.fromCronValue(launchdWeekday == 7 ? "0" : "\(launchdWeekday)")
         }
         job.selectedWeekdays = Array(Set(weekdays)).sorted { $0.cronValue < $1.cronValue }
+        job.selectedMonthDays = Array(Set(calendars.compactMap { $0["Day"] }.map { min(max($0, 1), 31) })).sorted()
+        job.selectedMonths = Array(Set(calendars.compactMap { $0["Month"] }.map { min(max($0, 1), 12) })).sorted()
     }
 
     private func runScriptAsAdmin(_ shellScript: String) throws {
@@ -1676,6 +2018,7 @@ struct ContentView: View {
         .onAppear {
             viewModel.load()
         }
+        .background(WindowCloseHandler(viewModel: viewModel))
     }
 
     private var sidebar: some View {
@@ -1891,89 +2234,27 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Toggle(L10n.t("Schedule enabled"), isOn: binding(index, \.scheduleEnabled))
 
-                HStack(alignment: .center, spacing: 10) {
-                    Picker(L10n.t("Days"), selection: Binding(
-                        get: { weekdayPreset(for: viewModel.jobs[index]) },
-                        set: { applyWeekdayPreset($0) }
-                    )) {
-                        Text(L10n.t("Daily")).tag("daily")
-                        Text(L10n.t("Workdays")).tag("workdays")
-                        Text(L10n.t("Weekend")).tag("weekend")
-                        Text(L10n.t("Custom")).tag("custom")
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 330)
-
-                    HStack(spacing: 4) {
-                        ForEach([Weekday.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]) { weekday in
-                            Toggle(weekday.shortTitle, isOn: Binding(
-                                get: { viewModel.jobs[index].selectedWeekdays.contains(weekday) },
-                                set: { _ in viewModel.toggleWeekdayForSelectedJob(weekday) }
-                            ))
-                            .toggleStyle(.button)
-                            .controlSize(.small)
-                        }
+                Picker(L10n.t("Schedule Type"), selection: binding(index, \.scheduleKind)) {
+                    ForEach(scheduleKinds(for: viewModel.jobs[index])) { kind in
+                        Text(kind.title).tag(kind)
                     }
                 }
+                .pickerStyle(.segmented)
+                .frame(width: 260)
                 .disabled(!viewModel.jobs[index].scheduleEnabled)
 
-                HStack(alignment: .top, spacing: 14) {
-                    compactTimeControl(
-                        title: L10n.t("Hour"),
-                        picker: Picker(L10n.t("Hour"), selection: binding(index, \.hourMode)) {
-                            ForEach(TimeFieldMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
-                            }
-                        },
-                        value: AnyView(hourValueControl(index: index))
-                    )
-
-                    compactTimeControl(
-                        title: L10n.t("Minute"),
-                        picker: Picker(L10n.t("Minute"), selection: binding(index, \.minuteMode)) {
-                            ForEach(TimeFieldMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
-                            }
-                        },
-                        value: AnyView(minuteValueControl(index: index))
-                    )
-                }
-                .disabled(!viewModel.jobs[index].scheduleEnabled)
-
-                HStack(spacing: 8) {
-                    Button {
-                        viewModel.addFixedTimeForSelectedJob()
-                    } label: {
-                        Label(L10n.t("Time"), systemImage: "plus")
-                    }
-                    .controlSize(.small)
-
-                    if viewModel.jobs[index].fixedTimes.isEmpty {
-                        Text(L10n.t("no fixed times"))
+                if viewModel.jobs[index].scheduleKind == .interval {
+                    intervalScheduleControls(index: index)
+                        .disabled(!viewModel.jobs[index].scheduleEnabled || viewModel.jobs[index].backend == .crontab)
+                    if viewModel.jobs[index].backend == .crontab {
+                        Text(L10n.t("Interval schedules use launchd StartInterval and are available for LaunchAgent and LaunchDaemon jobs."))
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(viewModel.jobs[index].fixedTimes) { time in
-                            Button {
-                                viewModel.removeFixedTimeForSelectedJob(time)
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Text(time.label)
-                                        .monospacedDigit()
-                                    Image(systemName: "xmark.circle.fill")
-                                        .imageScale(.small)
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.quaternary, in: Capsule())
-                        }
                     }
+                } else {
+                    calendarScheduleControls(index: index)
+                        .disabled(!viewModel.jobs[index].scheduleEnabled)
                 }
-                .disabled(!viewModel.jobs[index].scheduleEnabled)
 
                 Text(viewModel.jobs[index].scheduleDescription)
                     .font(.callout)
@@ -1981,6 +2262,163 @@ struct ContentView: View {
                     .padding(.top, 2)
             }
         }
+    }
+
+    private func calendarScheduleControls(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Picker(L10n.t("Days"), selection: Binding(
+                    get: { weekdayPreset(for: viewModel.jobs[index]) },
+                    set: { applyWeekdayPreset($0) }
+                )) {
+                    Text(L10n.t("Daily")).tag("daily")
+                    Text(L10n.t("Workdays")).tag("workdays")
+                    Text(L10n.t("Weekend")).tag("weekend")
+                    Text(L10n.t("Custom")).tag("custom")
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 330)
+
+                HStack(spacing: 4) {
+                    ForEach([Weekday.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]) { weekday in
+                        Toggle(weekday.shortTitle, isOn: Binding(
+                            get: { viewModel.jobs[index].selectedWeekdays.contains(weekday) },
+                            set: { _ in viewModel.toggleWeekdayForSelectedJob(weekday) }
+                        ))
+                        .toggleStyle(.button)
+                        .controlSize(.small)
+                    }
+                }
+            }
+
+            monthDayControls(index: index)
+            monthControls(index: index)
+
+            HStack(alignment: .top, spacing: 14) {
+                compactTimeControl(
+                    title: L10n.t("Hour"),
+                    picker: Picker(L10n.t("Hour"), selection: binding(index, \.hourMode)) {
+                        ForEach(TimeFieldMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    },
+                    value: AnyView(hourValueControl(index: index))
+                )
+
+                compactTimeControl(
+                    title: L10n.t("Minute"),
+                    picker: Picker(L10n.t("Minute"), selection: binding(index, \.minuteMode)) {
+                        ForEach(TimeFieldMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    },
+                    value: AnyView(minuteValueControl(index: index))
+                )
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.addFixedTimeForSelectedJob()
+                } label: {
+                    Label(L10n.t("Time"), systemImage: "plus")
+                }
+                .controlSize(.small)
+
+                if viewModel.jobs[index].fixedTimes.isEmpty {
+                    Text(L10n.t("no fixed times"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.jobs[index].fixedTimes) { time in
+                        Button {
+                            viewModel.removeFixedTimeForSelectedJob(time)
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(time.label)
+                                    .monospacedDigit()
+                                Image(systemName: "xmark.circle.fill")
+                                    .imageScale(.small)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
+                    }
+                }
+            }
+        }
+    }
+
+    private func intervalScheduleControls(index: Int) -> some View {
+        HStack(spacing: 10) {
+            Stepper(value: binding(index, \.intervalValue), in: 1...86_400) {
+                Text(L10n.f("Every %d", viewModel.jobs[index].intervalValue))
+                    .monospacedDigit()
+            }
+            .frame(width: 160)
+
+            Picker(L10n.t("Unit"), selection: binding(index, \.intervalUnit)) {
+                ForEach(IntervalUnit.allCases) { unit in
+                    Text(unit.title).tag(unit)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 260)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func monthDayControls(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.t("Month Days"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 4), count: 16), alignment: .leading, spacing: 4) {
+                ForEach(1...31, id: \.self) { day in
+                    Toggle("\(day)", isOn: Binding(
+                        get: { viewModel.jobs[index].selectedMonthDays.contains(day) },
+                        set: { _ in viewModel.toggleMonthDayForSelectedJob(day) }
+                    ))
+                    .toggleStyle(.button)
+                    .controlSize(.mini)
+                    .frame(width: 34)
+                }
+            }
+            Text(L10n.t("Leave empty for every day of the month."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func monthControls(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.t("Months"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(1...12, id: \.self) { month in
+                    Toggle(monthShortTitle(month), isOn: Binding(
+                        get: { viewModel.jobs[index].selectedMonths.contains(month) },
+                        set: { _ in viewModel.toggleMonthForSelectedJob(month) }
+                    ))
+                    .toggleStyle(.button)
+                    .controlSize(.mini)
+                }
+            }
+            Text(L10n.t("Leave empty for every month."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func monthShortTitle(_ month: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        return formatter.shortMonthSymbols[max(min(month, 12), 1) - 1]
     }
 
     private func compactTimeControl<PickerContent: View>(title: String, picker: PickerContent, value: AnyView) -> some View {
@@ -2019,6 +2457,10 @@ struct ContentView: View {
         default:
             break
         }
+    }
+
+    private func scheduleKinds(for job: CronJob) -> [ScheduleKind] {
+        job.backend == .crontab ? [.calendar] : ScheduleKind.allCases
     }
 
     @ViewBuilder
@@ -2165,6 +2607,8 @@ struct ContentView: View {
                             Text(L10n.t("RunAtLoad is only available for LaunchAgent and LaunchDaemon jobs."))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        } else {
+                            launchdOptions(index: index)
                         }
 
                         Toggle(L10n.t("Enable logging"), isOn: binding(index, \.loggingEnabled))
@@ -2197,6 +2641,82 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func launchdOptions(index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.t("LaunchD Options"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.t("Watch Paths"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: binding(index, \.watchPathsText))
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 62)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Text(L10n.t("One file or folder path per line."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.t("Queue Directories"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: binding(index, \.queueDirectoriesText))
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 62)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Text(L10n.t("One directory path per line."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.t("Working Directory"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField("/Users/me/project", text: binding(index, \.workingDirectory))
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(L10n.t("Environment Variables"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: binding(index, \.environmentVariablesText))
+                        .font(.system(.body, design: .monospaced))
+                        .frame(height: 62)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                    Text(L10n.t("KEY=value, one per line."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 16) {
+                Toggle(L10n.t("Start on mount"), isOn: binding(index, \.startOnMount))
+                Toggle(L10n.t("Keep alive"), isOn: binding(index, \.keepAlive))
+                Toggle(L10n.t("Throttle"), isOn: binding(index, \.throttleIntervalEnabled))
+
+                if viewModel.jobs[index].throttleIntervalEnabled {
+                    Stepper(value: binding(index, \.throttleInterval), in: 1...86_400) {
+                        Text(L10n.f("%d seconds", viewModel.jobs[index].throttleInterval))
+                            .monospacedDigit()
+                    }
+                    .frame(width: 160)
+                }
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var footer: some View {
@@ -2265,6 +2785,7 @@ struct ContentView: View {
             get: { viewModel.jobs[index][keyPath: keyPath] },
             set: { value in
                 viewModel.jobs[index][keyPath: keyPath] = value
+                viewModel.markDirty()
             }
         )
     }
@@ -2283,6 +2804,7 @@ struct ContentView: View {
                 } else {
                     viewModel.jobs[index].interpreterPath = interpreter.rawValue
                 }
+                viewModel.markDirty()
             }
         )
     }
@@ -2343,30 +2865,89 @@ struct SettingsView: View {
     }
 }
 
+struct WindowCloseHandler: NSViewRepresentable {
+    @ObservedObject var viewModel: CrontabViewModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(viewModel: viewModel)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.delegate = context.coordinator
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.viewModel = viewModel
+        DispatchQueue.main.async {
+            nsView.window?.delegate = context.coordinator
+        }
+    }
+
+    final class Coordinator: NSObject, NSWindowDelegate {
+        var viewModel: CrontabViewModel
+
+        init(viewModel: CrontabViewModel) {
+            self.viewModel = viewModel
+        }
+
+        func windowShouldClose(_ sender: NSWindow) -> Bool {
+            guard viewModel.hasUnsavedChanges else {
+                return true
+            }
+
+            let alert = NSAlert()
+            alert.messageText = L10n.t("Save changes before closing?")
+            alert.informativeText = L10n.t("You have unsaved jobs or changes. Save them before closing, discard them, or cancel closing.")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L10n.t("Save"))
+            alert.addButton(withTitle: L10n.t("Discard"))
+            alert.addButton(withTitle: L10n.t("Cancel"))
+
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                return viewModel.save()
+            case .alertSecondButtonReturn:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+}
+
 struct JobRow: View {
     let job: CronJob
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(job.title)
-                .font(.system(size: 14, weight: .semibold))
-                .lineLimit(1)
+        HStack(alignment: .top, spacing: 9) {
+            StatusLight(job: job)
+                .padding(.top, 4)
 
-            HStack(spacing: 6) {
-                Text(job.backend.rawValue)
-                Text("·")
-                Text(job.cronExpressions.first ?? job.cronExpression)
-                    .monospacedDigit()
-                Text("·")
-                Text(job.isEnabled ? L10n.t("active") : L10n.t("inactive"))
-                if !job.isManaged {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(job.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(job.backend.rawValue)
                     Text("·")
-                    Text(L10n.t("external"))
+                    Text(job.cronExpressions.first ?? job.cronExpression)
+                        .monospacedDigit()
+                    Text("·")
+                    Text(job.statusTitle)
+                    if !job.isManaged {
+                        Text("·")
+                        Text(L10n.t("external"))
+                    }
                 }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
         }
         .padding(.vertical, 6)
         .help(jobTooltip)
@@ -2381,6 +2962,35 @@ struct JobRow: View {
         ]
         .filter { !$0.isEmpty }
         .joined(separator: "\n")
+    }
+}
+
+struct StatusLight: View {
+    let job: CronJob
+
+    var body: some View {
+        Circle()
+            .fill(fill)
+            .overlay {
+                Circle()
+                    .strokeBorder(stroke, lineWidth: job.isInstalled ? 0 : 1.5)
+            }
+            .shadow(color: glow, radius: job.isInstalled && job.isEnabled ? 3 : 0)
+            .frame(width: 9, height: 9)
+            .accessibilityLabel(job.statusTitle)
+    }
+
+    private var fill: Color {
+        if !job.isInstalled { return .white.opacity(0.85) }
+        return job.isEnabled ? .green : .gray.opacity(0.55)
+    }
+
+    private var stroke: Color {
+        job.isInstalled ? .clear : .gray.opacity(0.55)
+    }
+
+    private var glow: Color {
+        .green.opacity(0.45)
     }
 }
 
